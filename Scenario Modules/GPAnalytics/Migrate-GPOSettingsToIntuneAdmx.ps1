@@ -1,67 +1,43 @@
 <#
 .Synopsis
-   Update-MigrationReadinessReport - Imports a select GPO into Intune and generate Migration report
+   Migrate-GPOSettingsToIntuneAdmx - Migrates the GPO Settings for GPOs uploaded to Intune Policy Analytics to MDM via Administrative templates configuration Profiles
 .DESCRIPTION
-   Runs the IPA Build verification tests
+   Migrates the GPO Settings for GPOs uploaded to Intune Policy Analytics to MDM via Administrative templates configuration Profiles
 .PARAMETER TenantAdminUPN
-    UPN of the Tenant Administrator
-.PARAMETER Environment
-    Supported values: "pe" - production environment - default value
-                      "pe_canary" - production canary environment
-.EXAMPLE
-     Update-MigrationReadinessReport -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
-       Updates the Migration Readiness Report for previously uploaded GPOs.
-                    
+    The UPN of the Intune Tenant Admin.
 #>
 param(
     [Alias("TenantAdminUPN")]
-    [String]$script:TenantAdminUPN = $null,
-    [Alias("Environment")]
-    [String]$script:Environment = "pe"
+    [String]$script:TenantAdminUPN = $null
 )
 
 #region Initialization
-$script:IPAWorkingFolder = "$($env:APPDATA)\IPA"
 $script:PSScriptRoot = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
-$script:PSScriptName = $MyInvocation.MyCommand.Name
-
 
 # Import dependencies
-Import-Module "$script:PSScriptRoot\IntunePolicyAnalyticsClient.psm1"
-
-If (!$script:TenantAdminUPN)
-{
-    $script:TenantAdminUPN = (Read-Host -Prompt "Enter TenantAdmin") 
-}
-
-$host.ui.RawUI.WindowTitle = "Update-MigrationReadinessReport: Environment=$($script:Environment),TenantAdminUPN=$($script:TenantAdminUPN)"
+Import-Module "$script:PSScriptRoot\IntunePolicyAnalyticsClient.psm1" -Force
 
 Try
 {
     # Initialize IPA Client
-    Initialize-IPAClientConfiguration -TenantAdminUPN $script:TenantAdminUPN -Environment $script:Environment   
-    
-    # Update the Migration Readiness Report
-    Update-MigrationReadinessReport -TenantAdminUPN $script:TenantAdminUPN
+    Initialize-IPAClientConfiguration -TenantAdminUPN $script:TenantAdminUPN
 
-    # Get the Migration Readiness Report
-    $MigrationReadinessReport = Get-MigrationReadinessReport -TenantAdminUPN $script:TenantAdminUPN
-
-    # Show the Migration Readiness report
-    $MigrationReadinessReport
+    # Migrate Settings
+    Add-GPToIntuneAdmxMigratedProfile -TenantAdminUPN $script:TenantAdminUPN
 }
 Catch
 {
-    $exception  = $_
-    Write-Error "Update-MigrationReadinessReport Failed. Failure: $($exception)"
+    $exception = $_
+    Write-Host "Migrate-GPOSettingsToIntuneAdmx.ps1 failed. Error = $($exception)"
     throw
 }
+
 
 # SIG # Begin signature block
 # MIIjkgYJKoZIhvcNAQcCoIIjgzCCI38CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIHMkP7mmFEBxZ
-# EXSXRJe+PtnzqemFv4GPECXj00Aq9qCCDYEwggX/MIID56ADAgECAhMzAAABh3IX
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVv3DjcEs8M67Q
+# HKvkR1bLNfYx51yAyPU84yDZvVUeWaCCDYEwggX/MIID56ADAgECAhMzAAABh3IX
 # chVZQMcJAAAAAAGHMA0GCSqGSIb3DQEBCwUAMH4xCzAJBgNVBAYTAlVTMRMwEQYD
 # VQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNy
 # b3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNpZ25p
@@ -138,19 +114,19 @@ Catch
 # HjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEoMCYGA1UEAxMfTWljcm9z
 # b2Z0IENvZGUgU2lnbmluZyBQQ0EgMjAxMQITMwAAAYdyF3IVWUDHCQAAAAABhzAN
 # BglghkgBZQMEAgEFAKCBrjAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIhYtFC1B
-# t1YZnC4w5k6OI6E94BdHs95ELZ1ddKC73JUwQgYKKwYBBAGCNwIBDDE0MDKgFIAS
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQguqAImYU7
+# BEgj7aakwSfJpCqAGpP2x1CR3V3P/S0bKCUwQgYKKwYBBAGCNwIBDDE0MDKgFIAS
 # AE0AaQBjAHIAbwBzAG8AZgB0oRqAGGh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbTAN
-# BgkqhkiG9w0BAQEFAASCAQAavHbQOAE4r667tt9kAaU7WOP0q0Wp2LBn+WjmctFO
-# 3/xiQhHjdPPI6L22GQDnAlmRTi3sb8wiD5gZHhslSRyAgnLY+OvlmU4Zm86xA6N9
-# oek43947BrWysKRNIq4UMZBz8leED5M2aE63Np+Smj5i8hYWp5wLPc/vHvuyQwwv
-# Gs3gwf4EiIZZYtb1LLdemm21oVBDWf9qmCeQnzsIF4cAiuntReJBgNrck1gaDtnQ
-# WsYXE/Y8XtIZ26SnSbX9l+UXxVjkFMfRzttx3a1Az64lI2iqH6VSoy0Aq1encCO2
-# eLJIDmDgvVhC8n4V3u3ETUIv1jtCdqUyaII19gVjZERpoYIS8TCCEu0GCisGAQQB
+# BgkqhkiG9w0BAQEFAASCAQDBSrNIy99C08HxdnS6p7Ty5ZyAQFLnJC1xeXhZ4ZU0
+# QD7zrNH+onFEyCHAVInjpWVAv7z//tYeLteUkta6wFgIVR6nI3PRCGijv2bkXT6I
+# 0mYr0OggXOzQGfb1jZSU/oc/AH842r6LTNIqpKd9eoBURuPgWlCIZPP/znI1EIIe
+# TBJqJWnzh7teiVafbQCmVoOoeV11xI/il3ueNEruNVBGL6GxyFWS06PBoe7D1AYY
+# cMrwpbTPo/O+EFaEeluGg4sP8MBKJ9TaQNJ0cRQBASMBMNJ0jFsGlBSi+9jBJyDG
+# t1/Ocd/kVOSJSAgDNbdsrElisEcJfU9/7mHgvUjCU8oXoYIS8TCCEu0GCisGAQQB
 # gjcDAwExghLdMIIS2QYJKoZIhvcNAQcCoIISyjCCEsYCAQMxDzANBglghkgBZQME
 # AgEFADCCAVUGCyqGSIb3DQEJEAEEoIIBRASCAUAwggE8AgEBBgorBgEEAYRZCgMB
-# MDEwDQYJYIZIAWUDBAIBBQAEIAV3UOsWwLiXMpn0brObdAoK48otGGpexWqt8FPi
-# mIR3AgZfPAf4/m8YEzIwMjAwODI1MTgwNTEyLjYyNFowBIACAfSggdSkgdEwgc4x
+# MDEwDQYJYIZIAWUDBAIBBQAEIE48UkSpnmP7jUu2tXJnbbaDkmaG7gYOceUlZSiU
+# PhU1AgZfPAf4/nIYEzIwMjAwODI1MTgwNTEyLjY2MlowBIACAfSggdSkgdEwgc4x
 # CzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRt
 # b25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1p
 # Y3Jvc29mdCBPcGVyYXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMg
@@ -236,16 +212,16 @@ Catch
 # BAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0IFRp
 # bWUtU3RhbXAgUENBIDIwMTACEzMAAAEuqNIZB5P0a+gAAAAAAS4wDQYJYIZIAWUD
 # BAIBBQCgggFKMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0B
-# CQQxIgQgvgHpFNS5m7fXvnJx7246jM+93wdl6+RVJvtnBAOC2g4wgfoGCyqGSIb3
+# CQQxIgQg9pvFRfnnfZylERcgpHR6qnSVTPvpdgb7qVyE4BInjH0wgfoGCyqGSIb3
 # DQEJEAIvMYHqMIHnMIHkMIG9BCDa/s3O8YhWiqpVN0kTeK+x2m0RAh17JpR6DiFo
 # TILJKTCBmDCBgKR+MHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwAhMzAAAB
 # LqjSGQeT9GvoAAAAAAEuMCIEIHnEHh6MCFlCoQIMTBlBWTTqKDbSu9SEMm2n5YDh
-# 9GczMA0GCSqGSIb3DQEBCwUABIIBAJLDzSLY9O5hWd8ynHvee19/ig3xUalN1X5U
-# LBrxCn4vPYqF3uTCLr1+XHLwwiDoaXmC2zhCCR4/PpuYHDewQ2KKJLUxg1+9X22A
-# 8bfRU3IjA6b78kTAyFpR/KsopkX3V3mYY3V5w28nRSC/oh7ckBGmAsQY9BT5ZZwq
-# 4AqL9MJ9EyIQgI9Ex0LH2IsPqPdl+YLsdgDzvCTUrXl7DCVbCINdX4TI4vFbsnz/
-# ndGOCrx6fCy6RMtlO3vfmqqJJdSvxfqhbwvwvZQmHMHg/LLGUnoGap6xSSegbGh1
-# 4fY6IQegYrB1QiM02Bq0C9BPFQt6YiY9ZvLQETollYLv+PPE42o=
+# 9GczMA0GCSqGSIb3DQEBCwUABIIBABSSCBYTH5GZuRkZ3keJofdP55LuBXGhfiMz
+# FyAeEG1KkQJ53iPuFxP6alJ43v2X9yc9fstnjemSg0zsWFv/jzrEN7X3dCdnYCAS
+# GOJjtnWDXM62JIClPBHO9noJCSMYr0Ptz2A7ANzCGnWcHDT7evSy7vfgs7StqPtY
+# UHLxMlFKStYmjRfvi1SWtwrwvMPzjqgBFw8QFTjTcqEzbhz/H/Wb6hZaDgjA9kLD
+# 2dGdRaEh77ggnVKUO3XPod5QB1K5/LXeqrLtucQJoO2XAiuiDkiWWxSzjqoHDd4x
+# fGMXWM5arDf4+9D+e+FVHWiDdt7ahKga8T7ak3vD54uq2wFiJ+w=
 # SIG # End signature block

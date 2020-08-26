@@ -647,6 +647,410 @@ Function Remove-GPOMigrationReportCollection
     }
 }
 
+Function Add-GPToIntuneAdmxMigratedProfile
+{
+<#
+.Synopsis
+   Migrates the GPO Migration Reports to Intune Admx Profiles
+.DESCRIPTION
+   Migrates the GPO Migration Reports to Intune Admx Profiles
+.PARAMETER TenantAdminUPN
+    The UPN of the Intune Tenant Admin.
+.EXAMPLE
+    Add-GPToIntuneAdmxMigratedProfile -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
+    Creates Administrative Templates Configuration Profiles to migrate the GPOs
+#>
+
+    [cmdletbinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$TenantAdminUPN
+    )
+
+    Try
+    {
+        # Initialize Module
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+
+        # Fetch the migration report
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+
+        # Get Migration reports (Add filters here -SettingCategory, GPO ... )
+        $GPOMigrationReportCollection = Get-GPOMigrationReportCollection -TenantAdminUPN $TenantAdminUPN -ExpandSettings    
+
+        # Dictionary to store Parent Settings
+        $AdmxSupportedParentSettings = @{} 
+        
+        # Dictionary to store Child Settings
+        $AdmxSupportedChildSettings = @{}
+
+        # Get all setting mappings
+        $SettingMappings = $GPOMigrationReportCollection.GetEnumerator() | ForEach-Object {If(([PSCustomObject]($_.value).SettingMappings)){([PSCustomObject]($_.value).SettingMappings)}}
+        
+        # Populate dictionary for parent settings
+        $SettingMappings | ForEach-Object { If(($null -ne $_) -and ($_.AdmxSettingDefinitionId -ne $null) -and $_.parentId -eq $null){ $AdmxSupportedParentSettings[$_.id]=$_}}
+
+        # Populate dictionary for child settings
+        $SettingMappings | ForEach-Object { If(($null -ne $_) -and ($_.AdmxSettingDefinitionId -ne $null) -and $_.parentId -ne $null){ $AdmxSupportedChildSettings[$_.id]=$_}}
+
+        # list of settings for admx profile
+        $SettingsForAdmxProfile = @()
+
+         $AdmxSupportedParentSettings.GetEnumerator() | ForEach-Object { 
+                
+                $AdmxSetting = $_.Value               
+
+                 Switch($AdmxSetting.settingValueType){
+                    "Boolean" {
+                        $odataType = "#microsoft.graph.omaSettingBoolean";
+                        Switch($AdmxSetting.settingValue) {
+                            "Enabled" { $value = $true }
+                            "Disabled" { $value = $false }
+                             Default { $value = $false }
+                        }
+                    }                    
+                }
+
+                $PresentationList = New-Object Collections.Generic.List[PSCustomObject]
+                if($value -eq $true -and $AdmxSetting.childIdList.count -gt 0){                   
+                   $PresentationList += (ProcessAdmxChildrenForPresentation $AdmxSetting.childIdList $AdmxSetting.AdmxSettingDefinitionId)
+                }
+
+                $odataBind = "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/deviceManagement/groupPolicyDefinitions('$($AdmxSetting.AdmxSettingDefinitionId)')"
+
+                $SettingBody = [PSCustomObject]@{`
+                   enabled = $value;`
+                    presentationValues = $PresentationList;`
+                    'definition@odata.bind' = $($odataBind);`
+                }
+
+                $SettingsForAdmxProfile+=($SettingBody)
+        }
+
+        try 
+        {        
+            $admxContainerUri = "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/deviceManagement/groupPolicyConfigurations"
+
+            $namePrefix = "GPO to Admx Migrated-$(Get-Date -UFormat "%Y/%m/%d-%H%M")"
+            Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Creating Admx Profile: $namePrefix"
+
+            $admxContainerBody = [PSCustomObject]@{`
+                displayName = $namePrefix;`
+                description = "Admx Profile created for GPOs imported in IPA";`
+                roleScopeTagIds = @("0");`
+            }
+                
+            $admxProfile = (Add-IntuneEntityCollection -Body ($admxContainerBody | ConvertTo-Json) -uri $admxContainerUri -GraphConfiguration $script:GraphConfiguration)
+            
+            Write-Log -Message "Profile created successfully"
+            Write-Log -Message "Id of Admx Profile created. $($admxProfile.Id)"
+        }
+        catch 
+        {
+            $exception  = $_
+            Write-Host $exception
+            Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Failure: $($exception)"
+            throw
+        }
+        
+        try
+        {
+
+            $admxUpdateContainerBody = [PSCustomObject]@{`
+                    added = $SettingsForAdmxProfile;`
+                    updated = @();`
+                    deletedIds = @();`
+                    }
+
+            $unescapedContainerBody = ( ConvertTo-Json $admxUpdateContainerBody -depth 10 | % { [regex]::Unescape($_) })
+
+            $admxUpdateContainerUri =   "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/deviceManagement/groupPolicyConfigurations('$($admxProfile.Id)')/updateDefinitionValues"
+            Write-Log -Message "Uri to update profile: . $($admxUpdateContainerUri)"
+            $updatedConfiguration = (Add-IntuneEntityCollection -Body $unescapedContainerBody -uri $admxUpdateContainerUri -GraphConfiguration $script:GraphConfiguration)
+            Write-Log -Message "Profile updated successfully"
+        }
+        catch
+        {
+            $exception  = $_
+            Write-Host $exception
+            Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Failure: $($exception)"  
+            throw
+        }      
+
+    }
+    Catch
+    {
+        $exception  = $_
+        Write-Host $exception
+        Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Failure: $($exception)" -Level "Error"
+        Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: IPAGlobalSettingBag: $($IPAClientConfiguration)"
+        throw
+    }
+    Finally
+    {
+        $IPAClientConfiguration | ConvertTo-Json | Out-File -FilePath "$($IPAClientConfiguration.ConfigurationFolderPath)\IPAGlobalSettingBag.json"
+        $sw.Stop()
+        Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Elapsed time = $($sw.Elapsed.ToString())"
+    }
+   
+
+}
+
+Function ProcessAdmxChildrenForPresentation ($ChildIdList, $ParentAdmxDefinitionId) {
+<#.Synopsis
+   Processes the child settings and creates List of Presentation objects for ADMX profile
+.DESCRIPTION
+   Processes the child settings and creates List of Presentation objects for ADMX profile
+.PARAMETER $ChildIdList
+    List of children to be processed.
+.PARAMETER  $ParentAdmxDefinitionId
+    Admx id of the parent.
+#>
+
+   $listOfSettings = New-Object Collections.Generic.List[PSCustomObject]
+   $ChildIdList.GetEnumerator() | ForEach-Object{
+        $childSetting = $AdmxSupportedChildSettings[$_]
+        Switch($childSetting.settingValueType){
+            "Boolean" {
+
+                $odataType = "#microsoft.graph.groupPolicyPresentationValueDecimal";
+
+                Switch($childSetting.settingValue) {
+                    "Enabled" { $value = $true }
+                    "Disabled" { $value = $false }
+                        "true" { $value = $true }
+                    "false" { $value = $false }
+                        Default { $value = $false }
+                }
+            }
+            "UInt32" {
+                $odataType = "#microsoft.graph.groupPolicyPresentationValueDecimal";
+                $value = $($childSetting.settingValue) -as [int];
+            }
+            "UInt64"{
+                $odataType = "#microsoft.graph.groupPolicyPresentationValueLongDecimal";
+                $value = $($childSetting.settingValue) -as [int64];
+            }
+            "String" {
+                    $odataType = "#microsoft.graph.groupPolicyPresentationValueText";
+                    $value = $($childSetting.settingValue);
+            }
+            "DropDownListEnum" {
+                    $odataType = "#microsoft.graph.groupPolicyPresentationValueText";
+                    $value = $($childSetting.settingValue);
+
+            }
+            "JsonListBox" {
+                $odataType = "#microsoft.graph.groupPolicyPresentationValueList";
+
+                $value = New-Object Collections.Generic.List[PSCustomObject]
+                $listArray = ConvertFrom-Json $childSetting.settingValue;
+                $listArray.GetEnumerator() | ForEach-Object { 
+
+                    if($_.name -eq $null){
+                        $listitem = [PSCustomObject]@{`
+                                "name" = $_.Data;`                    
+                        }
+
+                        $value += $listitem
+                    }
+                    else
+                    {
+                        $listitem = [PSCustomObject]@{`
+                                "name" = $_.Name;`
+                                "value" = $_.Data                    
+                        }
+
+                        $value += $listitem
+                    }                            
+                }
+                        
+            }
+            "JsonDisplayField" {
+                    $odataType = "#microsoft.graph.omaSettingString";
+                    $value = $($childSetting.settingValue);
+            }
+            "JsonMultiStrings" {
+                    $odataType = "#microsoft.graph.omaSettingString";
+                    $value = $($childSetting.settingValue);
+            }
+                   
+                   
+            Default {
+                    $odataType = $($childSetting.settingValueType);
+                    $value = $($childSetting.settingValue);
+            }
+        }
+
+        $valuePropertyStr = "value"
+
+        if($value.GetType().ToString() -eq "System.Object[]")
+        {
+            $valuePropertyStr = "values"
+        }
+                
+        $childSettingPresentation = [PSCustomObject]@{`
+            "$valuePropertyStr" = $value;`
+            '@odata.type' = $odataType;`
+            'presentation@odata.bind' = "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/deviceManagement/groupPolicyDefinitions('$($ParentAdmxDefinitionId)')/presentations('$($childSetting.AdmxSettingDefinitionId)')";`
+        }
+
+        $listOfSettings += ($childSettingPresentation)
+    
+   }
+  
+   Write-Output $listOfSettings
+}
+
+Function Add-GPToIntuneMigratedProfile
+{
+<#
+.Synopsis
+   Migrates the GPO Migration Reports for GPOs uploaded to Intune
+.DESCRIPTION
+   Migrates the GPO Migration Reports for GPOs uploaded to Intune
+.PARAMETER TenantAdminUPN
+    The UPN of the Intune Tenant Admin.
+.EXAMPLE
+    Add-GPToIntuneMigratedProfile -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
+    Creates Intune Profiles to migrate the GPOs
+#>
+
+    [cmdletbinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$TenantAdminUPN
+    )
+
+    Try
+    {
+        # Initialize Module
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+
+        # Fetch the migration report
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+
+        # Initialize Module
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN  $TenantAdminUPN
+
+        # Get Migration reports (Add filters here -SettingCategory, GPO ... )
+        $GPOMigrationReportCollection = Get-GPOMigrationReportCollection -TenantAdminUPN $TenantAdminUPN -ExpandSettings
+
+        # Create Custom OMA Uri profiles
+        $DCProfileCollection = @()
+        $DCUri = "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/deviceManagement/deviceConfigurations"
+
+        $GPOMigrationReportCollection.GetEnumerator() | ForEach-Object {
+            $gpoMigrationReport = $_
+            $MDMSupportedSettings = @{}
+            $SettingMappings = $gpoMigrationReport | ForEach-Object {If(([PSCustomObject]($_.value).SettingMappings)){([PSCustomObject]($_.value).SettingMappings)}}
+            $SettingMappings | ForEach-Object {If(($null -ne $_) -and ($_.isMdmSupported -eq $True)){$MDMSupportedSettings[$_.id]=$_}}
+
+            $omaSettings = @()
+            $omaSettingCount = 0
+            $MDMSupportedSettings.GetEnumerator() | ForEach-Object {
+                $MDMSupportedSetting = $_.Value
+                Switch($MDMSupportedSetting.settingValueType){
+                    "Boolean" {
+                        $odataType = "#microsoft.graph.omaSettingBoolean";
+                        Switch($MDMSupportedSetting.settingValue) {
+                            "Enabled" { $value = "true" }
+                            "true" { $value = "true" }
+                            Default { $value = "false" }
+                        }
+                    }
+                    "JsonDisplayField" {
+                         $odataType = "#microsoft.graph.omaSettingString";
+                         $value = $($MDMSupportedSetting.settingValue);
+                    }
+                    "JsonMultiStrings" {
+                         $odataType = "#microsoft.graph.omaSettingString";
+                         $value = $($MDMSupportedSetting.settingValue);
+                    }
+                    "JsonListBox" {
+                        $odataType = "#microsoft.graph.omaSettingString";
+                        $value = $($MDMSupportedSetting.settingValue);
+                   }
+                    "String" {
+                         $odataType = "#microsoft.graph.omaSettingString";
+                         $value = $($MDMSupportedSetting.settingValue);
+                    }
+                    "UInt32" {
+                        $odataType = "#microsoft.graph.omaSettingInteger";
+                        $value = $($MDMSupportedSetting.settingValue);
+                    }
+                    Default {
+                         $odataType = $($MDMSupportedSetting.settingValueType);
+                         $value = $($MDMSupportedSetting.settingValue);
+                    }
+                }
+
+                $omaSetting =  [PSCustomObject]@{`
+                    displayName = $($MDMSupportedSetting.settingName);`
+                    omaUri =  $($MDMSupportedSetting.mdmSettingUri);`
+                    '@odata.type' = $($odataType);`
+                    value = $($value);`
+                }
+
+                #
+                # Bugbug: only 1000 settings are allowed
+                #
+                if ($omaSettingCount -lt 1000)
+                {
+                    $omaSettings += $omaSetting                    
+                }
+                else
+                {
+                    Write-Log -Message "Add-GPToIntuneMigratedProfile: $($MDMSupportedSetting.settingName) skipped..."
+                }
+
+                $omaSettingCount++
+            }
+
+            $namePrefix = "GPAnalytics-Migrated-$(Get-Date -UFormat "%Y/%m/%d-%H%M")"
+            $customOMAProfile = [PSCustomObject]@{`
+                displayName = "$($namePrefix)-$($gpoMigrationReport.Name)";`
+                description = $($gpoMigrationReport.Value.OU);`
+                '@odata.type' = "#microsoft.graph.windows10CustomConfiguration";`
+                omaSettings = $omaSettings;`
+                }
+
+            try 
+            {
+                Write-Log -Message "Add-GPToIntuneMigratedProfile: Creating Profile: $($customOMAProfile.displayName)... "
+                $DCProfileCollection+= (Add-IntuneEntityCollection -Body ($customOMAProfile | ConvertTo-Json) -uri $DCUri -GraphConfiguration $script:GraphConfiguration)
+            }
+            catch 
+            {
+                $exception  = $_
+                Write-Log -Message "Add-GPToIntuneMigratedProfile: Failure: $($exception)"
+            }            
+            
+            #
+            # Sleep a bit to prevent throttling
+            #
+            Start-Sleep -Milliseconds 1000
+        }
+    }
+    Catch
+    {
+        $exception  = $_
+        Write-Log -Message "Add-GPToIntuneMigratedProfile: Failure: $($exception)" -Level "Error"
+        Write-Log -Message "Add-GPToIntuneMigratedProfile: IPAGlobalSettingBag: $($IPAClientConfiguration)"
+        throw
+    }
+    Finally
+    {
+        $IPAClientConfiguration | ConvertTo-Json | Out-File -FilePath "$($IPAClientConfiguration.ConfigurationFolderPath)\IPAGlobalSettingBag.json"
+        $sw.Stop()
+        Write-Log -Message "Add-GPToIntuneMigratedProfile: Elapsed time = $($sw.Elapsed.ToString())"
+    }
+}
+
+
+Export-ModuleMember -Function Add-GPToIntuneAdmxMigratedProfile
+Export-ModuleMember -Function Add-ChromeToEdgeMigratedProfile
+Export-ModuleMember -Function Add-GPToIntuneMigratedProfile
 Export-ModuleMember -Function Get-GPOMigrationReportCollection
 Export-ModuleMember -Function Get-MigrationReadinessReport
 Export-ModuleMember -Function Update-MigrationReadinessReport
@@ -950,11 +1354,11 @@ Function Connect-Intune
 #
 function CloneObject($object)
 {
-	$stream = New-Object IO.MemoryStream;
-	$formatter = New-Object Runtime.Serialization.Formatters.Binary.BinaryFormatter;
-	$formatter.Serialize($stream, $object);
-	$stream.Position = 0;
-	$formatter.Deserialize($stream);
+    $stream = New-Object IO.MemoryStream;
+    $formatter = New-Object Runtime.Serialization.Formatters.Binary.BinaryFormatter;
+    $formatter.Serialize($stream, $object);
+    $stream.Position = 0;
+    $formatter.Deserialize($stream);
 }
 
 <#
@@ -1005,34 +1409,45 @@ Function Get-AuthHeader
    The Collection path to the Graph Entitie that needs to be fetched.
 .PARAMETER Body
    The Json serialized Body of the HTTP POST call
+.PARAMETER GraphConfiguration
+    Graph Configuration
+.PARAMETER Uri
+    Graph Base route to use. Defaults to IPA Graph base route.
 #>
 function Add-IntuneEntityCollection
 {
     param
     (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$false)]
         $CollectionPath,
         [Parameter(Mandatory=$true)]
         $Body,
         [Parameter(Mandatory=$true)]
-        $GraphConfiguration
+        $GraphConfiguration,
+        [Parameter(Mandatory=$false)]
+        $uri = $null
     )
 
-    $uri = "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/$($GraphConfiguration.IPARoute)/$($collectionPath)";
+    If ($null -eq $uri)
+    {
+        $uri = "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/$($GraphConfiguration.IPARoute)/$($collectionPath)";
+    }
+
     $clonedHeaders = CloneObject (Get-AuthHeader $graphConfiguration);
-	$clonedHeaders["content-length"] = $Body.Length;
+    $clonedHeaders["content-length"] = $Body.Length;
     $clonedHeaders["api-version"] = "$($script:ApiVersion)";
 
-	Try
-	{        
+    Try
+    {
+        #Write-Log -Message "Add-IntuneEntityCollection: $($uri) -Method Post -Body $($body)"
         $response = Invoke-RestMethod $uri -Method Post -Headers $clonedHeaders -Body $body;
     }
     Catch
-	{
+    {
         $exception  = $_
-        Write-Log -Message "Add-IntuneEntityCollection: Failed. CollectionPath:$($CollectionPath). Size=$($Body.Length). Failure: $($exception)" -Level "Warn"
+        Write-Log -Message "Add-IntuneEntityCollection: Failed. CollectionPath:$($CollectionPath). Failure: $($exception)" -Level "Warn"
         throw
-	}
+    }
 
     return $response;
 }
@@ -1065,12 +1480,12 @@ Function Get-IntuneEntityCollection
     $clonedHeaders = CloneObject (Get-AuthHeader $graphConfiguration);
     $clonedHeaders["api-version"] = "$($script:ApiVersion)";
 
-	Try
-	{
+    Try
+    {
         $response = Invoke-RestMethod $uri -Method Get -Headers $clonedHeaders
-	}
-	Catch
-	{
+    }
+    Catch
+    {
         $exception  = $_
         Switch ($exception)
         {
@@ -1086,7 +1501,7 @@ Function Get-IntuneEntityCollection
                 throw
             }
         }
-	}
+    }
 
     return $response;
 }
@@ -1119,16 +1534,16 @@ Function Remove-IntuneEntityCollection
     $clonedHeaders = CloneObject (Get-AuthHeader $graphConfiguration);
     $clonedHeaders["api-version"] = "$($script:ApiVersion)";
 
-	Try
-	{
+    Try
+    {
         $response = Invoke-RestMethod $uri -Method Delete -Headers $clonedHeaders
-	}
-	Catch
-	{
+    }
+    Catch
+    {
         $exception  = $_
         Write-Log -Message "Remove-IntuneEntityCollection: DELETE $($uri) Failed. Failure: $($exception)" -Level "Warn"
         throw
-	}
+    }
 
     return $response;
 }
@@ -1234,194 +1649,194 @@ Function Get-GPOReportXmlCollectionFromAD
 }
 #endregion AD Utilities
 # SIG # Begin signature block
-# MIIjhwYJKoZIhvcNAQcCoIIjeDCCI3QCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIjkgYJKoZIhvcNAQcCoIIjgzCCI38CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRB7QsuihBVgFu
-# F3SiANo6r2t6JSunSLs3hXfL9d4TQaCCDXYwggX0MIID3KADAgECAhMzAAABhk0h
-# daDZB74sAAAAAAGGMA0GCSqGSIb3DQEBCwUAMH4xCzAJBgNVBAYTAlVTMRMwEQYD
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCADhCVM517N15/Y
+# Y4ypERNMnU24zmqMz+2oxqURS6nqJKCCDYEwggX/MIID56ADAgECAhMzAAABh3IX
+# chVZQMcJAAAAAAGHMA0GCSqGSIb3DQEBCwUAMH4xCzAJBgNVBAYTAlVTMRMwEQYD
 # VQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNy
 # b3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNpZ25p
-# bmcgUENBIDIwMTEwHhcNMjAwMzA0MTgzOTQ2WhcNMjEwMzAzMTgzOTQ2WjB0MQsw
+# bmcgUENBIDIwMTEwHhcNMjAwMzA0MTgzOTQ3WhcNMjEwMzAzMTgzOTQ3WjB0MQsw
 # CQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9u
 # ZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMR4wHAYDVQQDExVNaWNy
 # b3NvZnQgQ29ycG9yYXRpb24wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIB
-# AQC49eyyaaieg3Xb7ew+/hA34gqzRuReb9svBF6N3+iLD5A0iMddtunnmbFVQ+lN
-# Wphf/xOGef5vXMMMk744txo/kT6CKq0GzV+IhAqDytjH3UgGhLBNZ/UWuQPgrnhw
-# afQ3ZclsXo1lto4pyps4+X3RyQfnxCwqtjRxjCQ+AwIzk0vSVFnId6AwbB73w2lJ
-# +MC+E6nVmyvikp7DT2swTF05JkfMUtzDosktz/pvvMWY1IUOZ71XqWUXcwfzWDJ+
-# 96WxBH6LpDQ1fCQ3POA3jCBu3mMiB1kSsMihH+eq1EzD0Es7iIT1MlKERPQmC+xl
-# K+9pPAw6j+rP2guYfKrMFr39AgMBAAGjggFzMIIBbzAfBgNVHSUEGDAWBgorBgEE
-# AYI3TAgBBggrBgEFBQcDAzAdBgNVHQ4EFgQUhTFTFHuCaUCdTgZXja/OAQ9xOm4w
-# RQYDVR0RBD4wPKQ6MDgxHjAcBgNVBAsTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEW
-# MBQGA1UEBRMNMjMwMDEyKzQ1ODM4NDAfBgNVHSMEGDAWgBRIbmTlUAXTgqoXNzci
-# tW2oynUClTBUBgNVHR8ETTBLMEmgR6BFhkNodHRwOi8vd3d3Lm1pY3Jvc29mdC5j
-# b20vcGtpb3BzL2NybC9NaWNDb2RTaWdQQ0EyMDExXzIwMTEtMDctMDguY3JsMGEG
-# CCsGAQUFBwEBBFUwUzBRBggrBgEFBQcwAoZFaHR0cDovL3d3dy5taWNyb3NvZnQu
-# Y29tL3BraW9wcy9jZXJ0cy9NaWNDb2RTaWdQQ0EyMDExXzIwMTEtMDctMDguY3J0
-# MAwGA1UdEwEB/wQCMAAwDQYJKoZIhvcNAQELBQADggIBAEDkLXWKDtJ8rLh3d7XP
-# 1xU1s6Gt0jDqeHoIpTvnsREt9MsKriVGKdVVGSJow1Lz9+9bINmPZo7ZdMhNhWGQ
-# QnEF7z/3czh0MLO0z48cxCrjLch0P2sxvtcaT57LBmEy+tbhlUB6iz72KWavxuhP
-# 5zxKEChtLp8gHkp5/1YTPlvRYFrZr/iup2jzc/Oo5N4/q+yhOsRT3KJu62ekQUUP
-# sPU2bWsaF/hUPW/L2O1Fecf+6OOJLT2bHaAzr+EBAn0KAUiwdM+AUvasG9kHLX+I
-# XXlEZvfsXGzzxFlWzNbpM99umWWMQPTGZPpSCTDDs/1Ci0Br2/oXcgayYLaZCWsj
-# 1m/a0V8OHZGbppP1RrBeLQKfATjtAl0xrhMr4kgfvJ6ntChg9dxy4DiGWnsj//Qy
-# wUs1UxVchRR7eFaP3M8/BV0eeMotXwTNIwzSd3uAzAI+NSrN5pVlQeC0XXTueeDu
-# xDch3S5UUdDOvdlOdlRAa+85Si6HmEUgx3j0YYSC1RWBdEhwsAdH6nXtXEshAAxf
-# 8PWh2wCsczMe/F4vTg4cmDsBTZwwrHqL5krX++s61sLWA67Yn4Db6rXV9Imcf5UM
-# Cq09wJj5H93KH9qc1yCiJzDCtbtgyHYXAkSHQNpoj7tDX6ko9gE8vXqZIGj82mwD
-# TAY9ofRH0RSMLJqpgLrBPCKNMIIHejCCBWKgAwIBAgIKYQ6Q0gAAAAAAAzANBgkq
-# hkiG9w0BAQsFADCBiDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24x
-# EDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlv
-# bjEyMDAGA1UEAxMpTWljcm9zb2Z0IFJvb3QgQ2VydGlmaWNhdGUgQXV0aG9yaXR5
-# IDIwMTEwHhcNMTEwNzA4MjA1OTA5WhcNMjYwNzA4MjEwOTA5WjB+MQswCQYDVQQG
-# EwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwG
-# A1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSgwJgYDVQQDEx9NaWNyb3NvZnQg
-# Q29kZSBTaWduaW5nIFBDQSAyMDExMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIIC
-# CgKCAgEAq/D6chAcLq3YbqqCEE00uvK2WCGfQhsqa+laUKq4BjgaBEm6f8MMHt03
-# a8YS2AvwOMKZBrDIOdUBFDFC04kNeWSHfpRgJGyvnkmc6Whe0t+bU7IKLMOv2akr
-# rnoJr9eWWcpgGgXpZnboMlImEi/nqwhQz7NEt13YxC4Ddato88tt8zpcoRb0Rrrg
-# OGSsbmQ1eKagYw8t00CT+OPeBw3VXHmlSSnnDb6gE3e+lD3v++MrWhAfTVYoonpy
-# 4BI6t0le2O3tQ5GD2Xuye4Yb2T6xjF3oiU+EGvKhL1nkkDstrjNYxbc+/jLTswM9
-# sbKvkjh+0p2ALPVOVpEhNSXDOW5kf1O6nA+tGSOEy/S6A4aN91/w0FK/jJSHvMAh
-# dCVfGCi2zCcoOCWYOUo2z3yxkq4cI6epZuxhH2rhKEmdX4jiJV3TIUs+UsS1Vz8k
-# A/DRelsv1SPjcF0PUUZ3s/gA4bysAoJf28AVs70b1FVL5zmhD+kjSbwYuER8ReTB
-# w3J64HLnJN+/RpnF78IcV9uDjexNSTCnq47f7Fufr/zdsGbiwZeBe+3W7UvnSSmn
-# Eyimp31ngOaKYnhfsi+E11ecXL93KCjx7W3DKI8sj0A3T8HhhUSJxAlMxdSlQy90
-# lfdu+HggWCwTXWCVmj5PM4TasIgX3p5O9JawvEagbJjS4NaIjAsCAwEAAaOCAe0w
-# ggHpMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBRIbmTlUAXTgqoXNzcitW2o
-# ynUClTAZBgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMAQTALBgNVHQ8EBAMCAYYwDwYD
-# VR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBRyLToCMZBDuRQFTuHqp8cx0SOJNDBa
-# BgNVHR8EUzBRME+gTaBLhklodHRwOi8vY3JsLm1pY3Jvc29mdC5jb20vcGtpL2Ny
-# bC9wcm9kdWN0cy9NaWNSb29DZXJBdXQyMDExXzIwMTFfMDNfMjIuY3JsMF4GCCsG
-# AQUFBwEBBFIwUDBOBggrBgEFBQcwAoZCaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
-# L3BraS9jZXJ0cy9NaWNSb29DZXJBdXQyMDExXzIwMTFfMDNfMjIuY3J0MIGfBgNV
-# HSAEgZcwgZQwgZEGCSsGAQQBgjcuAzCBgzA/BggrBgEFBQcCARYzaHR0cDovL3d3
-# dy5taWNyb3NvZnQuY29tL3BraW9wcy9kb2NzL3ByaW1hcnljcHMuaHRtMEAGCCsG
-# AQUFBwICMDQeMiAdAEwAZQBnAGEAbABfAHAAbwBsAGkAYwB5AF8AcwB0AGEAdABl
-# AG0AZQBuAHQALiAdMA0GCSqGSIb3DQEBCwUAA4ICAQBn8oalmOBUeRou09h0ZyKb
-# C5YR4WOSmUKWfdJ5DJDBZV8uLD74w3LRbYP+vj/oCso7v0epo/Np22O/IjWll11l
-# hJB9i0ZQVdgMknzSGksc8zxCi1LQsP1r4z4HLimb5j0bpdS1HXeUOeLpZMlEPXh6
-# I/MTfaaQdION9MsmAkYqwooQu6SpBQyb7Wj6aC6VoCo/KmtYSWMfCWluWpiW5IP0
-# wI/zRive/DvQvTXvbiWu5a8n7dDd8w6vmSiXmE0OPQvyCInWH8MyGOLwxS3OW560
-# STkKxgrCxq2u5bLZ2xWIUUVYODJxJxp/sfQn+N4sOiBpmLJZiWhub6e3dMNABQam
-# ASooPoI/E01mC8CzTfXhj38cbxV9Rad25UAqZaPDXVJihsMdYzaXht/a8/jyFqGa
-# J+HNpZfQ7l1jQeNbB5yHPgZ3BtEGsXUfFL5hYbXw3MYbBL7fQccOKO7eZS/sl/ah
-# XJbYANahRr1Z85elCUtIEJmAH9AAKcWxm6U/RXceNcbSoqKfenoi+kiVH6v7RyOA
-# 9Z74v2u3S5fi63V4GuzqN5l5GEv/1rMjaHXmr/r8i+sLgOppO6/8MO0ETI7f33Vt
-# Y5E90Z1WTk+/gFcioXgRMiF670EKsT/7qMykXcGhiJtXcVZOSEXAQsmbdlsKgEhr
-# /Xmfwb1tbWrJUnMTDXpQzTGCFWcwghVjAgEBMIGVMH4xCzAJBgNVBAYTAlVTMRMw
-# EQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVN
-# aWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNp
-# Z25pbmcgUENBIDIwMTECEzMAAAGGTSF1oNkHviwAAAAAAYYwDQYJYIZIAWUDBAIB
-# BQCgga4wGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEO
-# MAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEII+hwwEQxq2Vg6Mt28kC3E5f
-# xeqSMGv/MW9SANodd6QgMEIGCisGAQQBgjcCAQwxNDAyoBSAEgBNAGkAYwByAG8A
-# cwBvAGYAdKEagBhodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20wDQYJKoZIhvcNAQEB
-# BQAEggEAcagKsuqUIK7Aoy9Lvwdnv6o4J9Vi6gLFUvCEO6mBWLzZkwvGjg9T/63L
-# sf+QZMHIasbng3Sf4X/hhCoqQD4Yg8bZem3/bEYWj/jY9i7ewvHPn943MIe3OJzt
-# FOKmXl141HpvLnTRWfvjwNbqi273YZzW7NIHUp4DR32gJE7vP4PpaSb/V5QkKMp2
-# zc5Whj7MVk/HhcPa0rWa6RnCy3wXb/O5IC8lV0QXQDjxWuxeoaTOaU6re83ppUdL
-# cz/TtQe4YMs77KYGlYYvJdK8rnRsQPcbbh348lKWc8U19EITmSXp0amQq20sTevv
-# PRJxGT7ndOP9dieq9F4WBxzZlGtz16GCEvEwghLtBgorBgEEAYI3AwMBMYIS3TCC
-# EtkGCSqGSIb3DQEHAqCCEsowghLGAgEDMQ8wDQYJYIZIAWUDBAIBBQAwggFVBgsq
-# hkiG9w0BCRABBKCCAUQEggFAMIIBPAIBAQYKKwYBBAGEWQoDATAxMA0GCWCGSAFl
-# AwQCAQUABCAa5snGWsMhxQbHUdyIhuKoVjSjaDwv/Vfz2vAcJc7tUAIGXtVI9vbP
-# GBMyMDIwMDYxODA5NTA1NS40ODhaMASAAgH0oIHUpIHRMIHOMQswCQYDVQQGEwJV
-# UzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UE
-# ChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSkwJwYDVQQLEyBNaWNyb3NvZnQgT3Bl
-# cmF0aW9ucyBQdWVydG8gUmljbzEmMCQGA1UECxMdVGhhbGVzIFRTUyBFU046Rjc3
-# Ri1FMzU2LTVCQUUxJTAjBgNVBAMTHE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZp
-# Y2Wggg5EMIIE9TCCA92gAwIBAgITMwAAASroF5b4hqfvowAAAAABKjANBgkqhkiG
-# 9w0BAQsFADB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4G
-# A1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSYw
-# JAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDAeFw0xOTEyMTkw
-# MTE1MDJaFw0yMTAzMTcwMTE1MDJaMIHOMQswCQYDVQQGEwJVUzETMBEGA1UECBMK
+# AQDOt8kLc7P3T7MKIhouYHewMFmnq8Ayu7FOhZCQabVwBp2VS4WyB2Qe4TQBT8aB
+# znANDEPjHKNdPT8Xz5cNali6XHefS8i/WXtF0vSsP8NEv6mBHuA2p1fw2wB/F0dH
+# sJ3GfZ5c0sPJjklsiYqPw59xJ54kM91IOgiO2OUzjNAljPibjCWfH7UzQ1TPHc4d
+# weils8GEIrbBRb7IWwiObL12jWT4Yh71NQgvJ9Fn6+UhD9x2uk3dLj84vwt1NuFQ
+# itKJxIV0fVsRNR3abQVOLqpDugbr0SzNL6o8xzOHL5OXiGGwg6ekiXA1/2XXY7yV
+# Fc39tledDtZjSjNbex1zzwSXAgMBAAGjggF+MIIBejAfBgNVHSUEGDAWBgorBgEE
+# AYI3TAgBBggrBgEFBQcDAzAdBgNVHQ4EFgQUhov4ZyO96axkJdMjpzu2zVXOJcsw
+# UAYDVR0RBEkwR6RFMEMxKTAnBgNVBAsTIE1pY3Jvc29mdCBPcGVyYXRpb25zIFB1
+# ZXJ0byBSaWNvMRYwFAYDVQQFEw0yMzAwMTIrNDU4Mzg1MB8GA1UdIwQYMBaAFEhu
+# ZOVQBdOCqhc3NyK1bajKdQKVMFQGA1UdHwRNMEswSaBHoEWGQ2h0dHA6Ly93d3cu
+# bWljcm9zb2Z0LmNvbS9wa2lvcHMvY3JsL01pY0NvZFNpZ1BDQTIwMTFfMjAxMS0w
+# Ny0wOC5jcmwwYQYIKwYBBQUHAQEEVTBTMFEGCCsGAQUFBzAChkVodHRwOi8vd3d3
+# Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY0NvZFNpZ1BDQTIwMTFfMjAx
+# MS0wNy0wOC5jcnQwDAYDVR0TAQH/BAIwADANBgkqhkiG9w0BAQsFAAOCAgEAixmy
+# S6E6vprWD9KFNIB9G5zyMuIjZAOuUJ1EK/Vlg6Fb3ZHXjjUwATKIcXbFuFC6Wr4K
+# NrU4DY/sBVqmab5AC/je3bpUpjtxpEyqUqtPc30wEg/rO9vmKmqKoLPT37svc2NV
+# BmGNl+85qO4fV/w7Cx7J0Bbqk19KcRNdjt6eKoTnTPHBHlVHQIHZpMxacbFOAkJr
+# qAVkYZdz7ikNXTxV+GRb36tC4ByMNxE2DF7vFdvaiZP0CVZ5ByJ2gAhXMdK9+usx
+# zVk913qKde1OAuWdv+rndqkAIm8fUlRnr4saSCg7cIbUwCCf116wUJ7EuJDg0vHe
+# yhnCeHnBbyH3RZkHEi2ofmfgnFISJZDdMAeVZGVOh20Jp50XBzqokpPzeZ6zc1/g
+# yILNyiVgE+RPkjnUQshd1f1PMgn3tns2Cz7bJiVUaqEO3n9qRFgy5JuLae6UweGf
+# AeOo3dgLZxikKzYs3hDMaEtJq8IP71cX7QXe6lnMmXU/Hdfz2p897Zd+kU+vZvKI
+# 3cwLfuVQgK2RZ2z+Kc3K3dRPz2rXycK5XCuRZmvGab/WbrZiC7wJQapgBodltMI5
+# GMdFrBg9IeF7/rP4EqVQXeKtevTlZXjpuNhhjuR+2DMt/dWufjXpiW91bo3aH6Ea
+# jOALXmoxgltCp1K7hrS6gmsvj94cLRf50QQ4U8Qwggd6MIIFYqADAgECAgphDpDS
+# AAAAAAADMA0GCSqGSIb3DQEBCwUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMK
 # V2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0
-# IENvcnBvcmF0aW9uMSkwJwYDVQQLEyBNaWNyb3NvZnQgT3BlcmF0aW9ucyBQdWVy
-# dG8gUmljbzEmMCQGA1UECxMdVGhhbGVzIFRTUyBFU046Rjc3Ri1FMzU2LTVCQUUx
-# JTAjBgNVBAMTHE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZpY2UwggEiMA0GCSqG
-# SIb3DQEBAQUAA4IBDwAwggEKAoIBAQCf35WBpIXSbcUrBwbvZZlxf1F8Txey+OZx
-# IZrXdNSg6LFm2PMueATe/pPQzL86k6D9/b/P2fjbRMyo/AX+REKBtf6SX6cwiXvN
-# B2asqjKNKEPRLoFWOmDVTWtk9budXfeqtYRZrtXYMbfLg9oOyKQUHYUtraXN49xx
-# Myr1f78BK+/wXE7sKlB6q6wYB3Pe9XqVUeKOWzSrI4pGsJjMPQ/7cq03IstxfRqv
-# aRIJPBKiXznQGm5Gp7gFk45ZgYWbUYjvVtahacJ7vRualb3TSkSsUHbcTAtOKVhn
-# 58cw2nO/oyKped9iBAuUEp72POLMxKccN9UFvy2n0og5gLWFh6ZvAgMBAAGjggEb
-# MIIBFzAdBgNVHQ4EFgQUcPTFLXQrP64TdsvRJBOmSPTvE2kwHwYDVR0jBBgwFoAU
-# 1WM6XIoxkPNDe3xGG8UzaFqFbVUwVgYDVR0fBE8wTTBLoEmgR4ZFaHR0cDovL2Ny
-# bC5taWNyb3NvZnQuY29tL3BraS9jcmwvcHJvZHVjdHMvTWljVGltU3RhUENBXzIw
-# MTAtMDctMDEuY3JsMFoGCCsGAQUFBwEBBE4wTDBKBggrBgEFBQcwAoY+aHR0cDov
-# L3d3dy5taWNyb3NvZnQuY29tL3BraS9jZXJ0cy9NaWNUaW1TdGFQQ0FfMjAxMC0w
-# Ny0wMS5jcnQwDAYDVR0TAQH/BAIwADATBgNVHSUEDDAKBggrBgEFBQcDCDANBgkq
-# hkiG9w0BAQsFAAOCAQEAisA09Apx1aOOjlslG6zyI/ECHH/j04wVWKSoNStg9eWe
-# sRLr5n/orOjfII/X9Z5BSAC74fohpMfBoBmv6APSIVzRBWDzRWh8B2p/1BMNT+k4
-# 3Wqst3LywvH/MxNQkdS4VzaH6usX6E/RyxhUoPbJDyzNU0PkQEF/TIoBJvBRZYYb
-# ENYhgdd/fcfHfdofSrKahg5zvemfQI+zmw7XVOkaGa7GZIkUDZ15p19SPkbsLS7v
-# DDfF4SS0pecKqhzN66mmjL0gCElbSskqcyQuWYfuZCZahXUoiB1vEPvEehFhvCC2
-# /T3/sPz8ncit2U5FV1KRQPiYVo3Ms6YVRsPX349GCjCCBnEwggRZoAMCAQICCmEJ
-# gSoAAAAAAAIwDQYJKoZIhvcNAQELBQAwgYgxCzAJBgNVBAYTAlVTMRMwEQYDVQQI
-# EwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3Nv
-# ZnQgQ29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBSb290IENlcnRpZmlj
-# YXRlIEF1dGhvcml0eSAyMDEwMB4XDTEwMDcwMTIxMzY1NVoXDTI1MDcwMTIxNDY1
-# NVowfDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcT
-# B1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UE
-# AxMdTWljcm9zb2Z0IFRpbWUtU3RhbXAgUENBIDIwMTAwggEiMA0GCSqGSIb3DQEB
-# AQUAA4IBDwAwggEKAoIBAQCpHQ28dxGKOiDs/BOX9fp/aZRrdFQQ1aUKAIKF++18
-# aEssX8XD5WHCdrc+Zitb8BVTJwQxH0EbGpUdzgkTjnxhMFmxMEQP8WCIhFRDDNdN
-# uDgIs0Ldk6zWczBXJoKjRQ3Q6vVHgc2/JGAyWGBG8lhHhjKEHnRhZ5FfgVSxz5NM
-# ksHEpl3RYRNuKMYa+YaAu99h/EbBJx0kZxJyGiGKr0tkiVBisV39dx898Fd1rL2K
-# Qk1AUdEPnAY+Z3/1ZsADlkR+79BL/W7lmsqxqPJ6Kgox8NpOBpG2iAg16HgcsOmZ
-# zTznL0S6p/TcZL2kAcEgCZN4zfy8wMlEXV4WnAEFTyJNAgMBAAGjggHmMIIB4jAQ
-# BgkrBgEEAYI3FQEEAwIBADAdBgNVHQ4EFgQU1WM6XIoxkPNDe3xGG8UzaFqFbVUw
-# GQYJKwYBBAGCNxQCBAweCgBTAHUAYgBDAEEwCwYDVR0PBAQDAgGGMA8GA1UdEwEB
-# /wQFMAMBAf8wHwYDVR0jBBgwFoAU1fZWy4/oolxiaNE9lJBb186aGMQwVgYDVR0f
-# BE8wTTBLoEmgR4ZFaHR0cDovL2NybC5taWNyb3NvZnQuY29tL3BraS9jcmwvcHJv
-# ZHVjdHMvTWljUm9vQ2VyQXV0XzIwMTAtMDYtMjMuY3JsMFoGCCsGAQUFBwEBBE4w
-# TDBKBggrBgEFBQcwAoY+aHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraS9jZXJ0
-# cy9NaWNSb29DZXJBdXRfMjAxMC0wNi0yMy5jcnQwgaAGA1UdIAEB/wSBlTCBkjCB
-# jwYJKwYBBAGCNy4DMIGBMD0GCCsGAQUFBwIBFjFodHRwOi8vd3d3Lm1pY3Jvc29m
-# dC5jb20vUEtJL2RvY3MvQ1BTL2RlZmF1bHQuaHRtMEAGCCsGAQUFBwICMDQeMiAd
-# AEwAZQBnAGEAbABfAFAAbwBsAGkAYwB5AF8AUwB0AGEAdABlAG0AZQBuAHQALiAd
-# MA0GCSqGSIb3DQEBCwUAA4ICAQAH5ohRDeLG4Jg/gXEDPZ2joSFvs+umzPUxvs8F
-# 4qn++ldtGTCzwsVmyWrf9efweL3HqJ4l4/m87WtUVwgrUYJEEvu5U4zM9GASinbM
-# QEBBm9xcF/9c+V4XNZgkVkt070IQyK+/f8Z/8jd9Wj8c8pl5SpFSAK84Dxf1L3mB
-# ZdmptWvkx872ynoAb0swRCQiPM/tA6WWj1kpvLb9BOFwnzJKJ/1Vry/+tuWOM7ti
-# X5rbV0Dp8c6ZZpCM/2pif93FSguRJuI57BlKcWOdeyFtw5yjojz6f32WapB4pm3S
-# 4Zz5Hfw42JT0xqUKloakvZ4argRCg7i1gJsiOCC1JeVk7Pf0v35jWSUPei45V3ai
-# caoGig+JFrphpxHLmtgOR5qAxdDNp9DvfYPw4TtxCd9ddJgiCGHasFAeb73x4QDf
-# 5zEHpJM692VHeOj4qEir995yfmFrb3epgcunCaw5u+zGy9iCtHLNHfS4hQEegPsb
-# iSpUObJb2sgNVZl6h3M7COaYLeqN4DMuEin1wC9UJyH3yKxO2ii4sanblrKnQqLJ
-# zxlBTeCG+SqaoxFmMNO7dDJL32N79ZmKLxvHIa9Zta7cRDyXUHHXodLFVeNp3lfB
-# 0d4wwP3M5k37Db9dT+mdHhk4L7zPWAUu7w2gUDXa7wknHNWzfjUeCLraNtvTX4/e
-# dIhJEqGCAtIwggI7AgEBMIH8oYHUpIHRMIHOMQswCQYDVQQGEwJVUzETMBEGA1UE
-# CBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9z
-# b2Z0IENvcnBvcmF0aW9uMSkwJwYDVQQLEyBNaWNyb3NvZnQgT3BlcmF0aW9ucyBQ
-# dWVydG8gUmljbzEmMCQGA1UECxMdVGhhbGVzIFRTUyBFU046Rjc3Ri1FMzU2LTVC
-# QUUxJTAjBgNVBAMTHE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZpY2WiIwoBATAH
-# BgUrDgMCGgMVAOqy5qyh8iDD++nj5d9tcSlCd2F/oIGDMIGApH4wfDELMAkGA1UE
-# BhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAc
-# BgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0
-# IFRpbWUtU3RhbXAgUENBIDIwMTAwDQYJKoZIhvcNAQEFBQACBQDilYe6MCIYDzIw
-# MjAwNjE4MTAyNzA2WhgPMjAyMDA2MTkxMDI3MDZaMHcwPQYKKwYBBAGEWQoEATEv
-# MC0wCgIFAOKVh7oCAQAwCgIBAAICJNQCAf8wBwIBAAICEaYwCgIFAOKW2ToCAQAw
-# NgYKKwYBBAGEWQoEAjEoMCYwDAYKKwYBBAGEWQoDAqAKMAgCAQACAwehIKEKMAgC
-# AQACAwGGoDANBgkqhkiG9w0BAQUFAAOBgQBM6zKMp1ZvIwWdqx5J+1DSzAqgRF6u
-# Y4dJkdjdycG2DaTHKdvjnn9u8s1gsS6S5hVp3lE3Uzkvx6+AttI03/r9oRbrdQat
-# eU6XeYc5UFMPFHcIZ5cCP7LXekH09IUeutw1Cm9755mkNWqPoXE022rt9QyE1ooQ
-# HSdxicamTahCHDGCAw0wggMJAgEBMIGTMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQI
-# EwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3Nv
-# ZnQgQ29ycG9yYXRpb24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBD
-# QSAyMDEwAhMzAAABKugXlviGp++jAAAAAAEqMA0GCWCGSAFlAwQCAQUAoIIBSjAa
-# BgkqhkiG9w0BCQMxDQYLKoZIhvcNAQkQAQQwLwYJKoZIhvcNAQkEMSIEIArboNeJ
-# y7W7g3BDBF8W0kPSKuRgAppDVhQjJx4/SbIoMIH6BgsqhkiG9w0BCRACLzGB6jCB
-# 5zCB5DCBvQQgQ5g1hFr3On4bObeFqKOUPhTBQnGiIFeMlD+AqbgZi5kwgZgwgYCk
+# IENvcnBvcmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUm9vdCBDZXJ0aWZpY2F0
+# ZSBBdXRob3JpdHkgMjAxMTAeFw0xMTA3MDgyMDU5MDlaFw0yNjA3MDgyMTA5MDla
+# MH4xCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
+# ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMT
+# H01pY3Jvc29mdCBDb2RlIFNpZ25pbmcgUENBIDIwMTEwggIiMA0GCSqGSIb3DQEB
+# AQUAA4ICDwAwggIKAoICAQCr8PpyEBwurdhuqoIQTTS68rZYIZ9CGypr6VpQqrgG
+# OBoESbp/wwwe3TdrxhLYC/A4wpkGsMg51QEUMULTiQ15ZId+lGAkbK+eSZzpaF7S
+# 35tTsgosw6/ZqSuuegmv15ZZymAaBelmdugyUiYSL+erCFDPs0S3XdjELgN1q2jz
+# y23zOlyhFvRGuuA4ZKxuZDV4pqBjDy3TQJP4494HDdVceaVJKecNvqATd76UPe/7
+# 4ytaEB9NViiienLgEjq3SV7Y7e1DkYPZe7J7hhvZPrGMXeiJT4Qa8qEvWeSQOy2u
+# M1jFtz7+MtOzAz2xsq+SOH7SnYAs9U5WkSE1JcM5bmR/U7qcD60ZI4TL9LoDho33
+# X/DQUr+MlIe8wCF0JV8YKLbMJyg4JZg5SjbPfLGSrhwjp6lm7GEfauEoSZ1fiOIl
+# XdMhSz5SxLVXPyQD8NF6Wy/VI+NwXQ9RRnez+ADhvKwCgl/bwBWzvRvUVUvnOaEP
+# 6SNJvBi4RHxF5MHDcnrgcuck379GmcXvwhxX24ON7E1JMKerjt/sW5+v/N2wZuLB
+# l4F77dbtS+dJKacTKKanfWeA5opieF+yL4TXV5xcv3coKPHtbcMojyyPQDdPweGF
+# RInECUzF1KVDL3SV9274eCBYLBNdYJWaPk8zhNqwiBfenk70lrC8RqBsmNLg1oiM
+# CwIDAQABo4IB7TCCAekwEAYJKwYBBAGCNxUBBAMCAQAwHQYDVR0OBBYEFEhuZOVQ
+# BdOCqhc3NyK1bajKdQKVMBkGCSsGAQQBgjcUAgQMHgoAUwB1AGIAQwBBMAsGA1Ud
+# DwQEAwIBhjAPBgNVHRMBAf8EBTADAQH/MB8GA1UdIwQYMBaAFHItOgIxkEO5FAVO
+# 4eqnxzHRI4k0MFoGA1UdHwRTMFEwT6BNoEuGSWh0dHA6Ly9jcmwubWljcm9zb2Z0
+# LmNvbS9wa2kvY3JsL3Byb2R1Y3RzL01pY1Jvb0NlckF1dDIwMTFfMjAxMV8wM18y
+# Mi5jcmwwXgYIKwYBBQUHAQEEUjBQME4GCCsGAQUFBzAChkJodHRwOi8vd3d3Lm1p
+# Y3Jvc29mdC5jb20vcGtpL2NlcnRzL01pY1Jvb0NlckF1dDIwMTFfMjAxMV8wM18y
+# Mi5jcnQwgZ8GA1UdIASBlzCBlDCBkQYJKwYBBAGCNy4DMIGDMD8GCCsGAQUFBwIB
+# FjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2RvY3MvcHJpbWFyeWNw
+# cy5odG0wQAYIKwYBBQUHAgIwNB4yIB0ATABlAGcAYQBsAF8AcABvAGwAaQBjAHkA
+# XwBzAHQAYQB0AGUAbQBlAG4AdAAuIB0wDQYJKoZIhvcNAQELBQADggIBAGfyhqWY
+# 4FR5Gi7T2HRnIpsLlhHhY5KZQpZ90nkMkMFlXy4sPvjDctFtg/6+P+gKyju/R6mj
+# 82nbY78iNaWXXWWEkH2LRlBV2AySfNIaSxzzPEKLUtCw/WvjPgcuKZvmPRul1LUd
+# d5Q54ulkyUQ9eHoj8xN9ppB0g430yyYCRirCihC7pKkFDJvtaPpoLpWgKj8qa1hJ
+# Yx8JaW5amJbkg/TAj/NGK978O9C9Ne9uJa7lryft0N3zDq+ZKJeYTQ49C/IIidYf
+# wzIY4vDFLc5bnrRJOQrGCsLGra7lstnbFYhRRVg4MnEnGn+x9Cf43iw6IGmYslmJ
+# aG5vp7d0w0AFBqYBKig+gj8TTWYLwLNN9eGPfxxvFX1Fp3blQCplo8NdUmKGwx1j
+# NpeG39rz+PIWoZon4c2ll9DuXWNB41sHnIc+BncG0QaxdR8UvmFhtfDcxhsEvt9B
+# xw4o7t5lL+yX9qFcltgA1qFGvVnzl6UJS0gQmYAf0AApxbGbpT9Fdx41xtKiop96
+# eiL6SJUfq/tHI4D1nvi/a7dLl+LrdXga7Oo3mXkYS//WsyNodeav+vyL6wuA6mk7
+# r/ww7QRMjt/fdW1jkT3RnVZOT7+AVyKheBEyIXrvQQqxP/uozKRdwaGIm1dxVk5I
+# RcBCyZt2WwqASGv9eZ/BvW1taslScxMNelDNMYIVZzCCFWMCAQEwgZUwfjELMAkG
+# A1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQx
+# HjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEoMCYGA1UEAxMfTWljcm9z
+# b2Z0IENvZGUgU2lnbmluZyBQQ0EgMjAxMQITMwAAAYdyF3IVWUDHCQAAAAABhzAN
+# BglghkgBZQMEAgEFAKCBrjAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7CYo1Ggt
+# 48eu3NVgNgZY+TNgMP7gihp6MbYY6yb9kcQwQgYKKwYBBAGCNwIBDDE0MDKgFIAS
+# AE0AaQBjAHIAbwBzAG8AZgB0oRqAGGh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbTAN
+# BgkqhkiG9w0BAQEFAASCAQCPEBv12zqUXycC1xqBgRe6EaQt1S7TBWuiVj9XG/Y1
+# 3A/THPO9L/YsmYjtF/COgab8j0Z1ne7MzTtO8JyDNvVvRqJMmzrGp2+lYu2HBrwy
+# Jl6huGTLrGGpU+Iu/fPP1QQ9Ex8TR/YEbWwn+GYKQ0XAGgqd+Ydm8siCBibAlOIy
+# yydCeA5Nd41PcHPnSCvfFv/q1UTmqCJCK10Nm+KO0jpTCJp7nhLnUBpPV1XpgNjd
+# xMOAaV/SC4tJXO4CVOxT077ncMxZJ/I79l40kwyRacfWsQ/f5s9Mt/eINmKYO904
+# Zuw27jIGODPdO7HJc5TlO8Q9vUGpHDqnDJvbRsJ1vBzNoYIS8TCCEu0GCisGAQQB
+# gjcDAwExghLdMIIS2QYJKoZIhvcNAQcCoIISyjCCEsYCAQMxDzANBglghkgBZQME
+# AgEFADCCAVUGCyqGSIb3DQEJEAEEoIIBRASCAUAwggE8AgEBBgorBgEEAYRZCgMB
+# MDEwDQYJYIZIAWUDBAIBBQAEICHoreylD0pBCp+Ls5Ki8hJWvaY3a/4i4wvLZfVD
+# OzaXAgZfPAf4/mwYEzIwMjAwODI1MTgwNTEyLjU4MVowBIACAfSggdSkgdEwgc4x
+# CzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRt
+# b25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1p
+# Y3Jvc29mdCBPcGVyYXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMg
+# VFNTIEVTTjozMkJELUUzRDUtM0IxRDElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUt
+# U3RhbXAgU2VydmljZaCCDkQwggT1MIID3aADAgECAhMzAAABLqjSGQeT9GvoAAAA
+# AAEuMA0GCSqGSIb3DQEBCwUAMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNo
+# aW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29y
+# cG9yYXRpb24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEw
+# MB4XDTE5MTIxOTAxMTUwNVoXDTIxMDMxNzAxMTUwNVowgc4xCzAJBgNVBAYTAlVT
+# MRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQK
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1pY3Jvc29mdCBPcGVy
+# YXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjozMkJE
+# LUUzRDUtM0IxRDElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2Vydmlj
+# ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAK7TTKJRU196LFIjMQ9q
+# /UjpPhz43m5RnHgHAVp2YGni74+ltsYoO1nZ58rTbJhCQ8GYHy8B4devgbqqYPQN
+# U3i+drpEtEcNLbsMr4MEq3SM+vO3a6QMFd1lDRy7IQLPJNLKvcM69Nt7ku1YyM5N
+# nPNDcRJsnUb/8Yx/zcW5cWjnoj8s9fQ93BPf/J74qM1ql2CdzQV74PBisMP/tppA
+# nSuNwo8I7+uWr6vfpBynSWDvJeMDrcsa62Xsm7DbB1NnSsPGAGt3RzlBV9KViciz
+# e4U3fo4chdoB2+QLu17PaEmj07qq700CG5XJkpEYOjedNFiByApF7YRvQrOZQ07Q
+# YiMCAwEAAaOCARswggEXMB0GA1UdDgQWBBSGmokmTguJN7uqSTQ1UhLwt1RObDAf
+# BgNVHSMEGDAWgBTVYzpcijGQ80N7fEYbxTNoWoVtVTBWBgNVHR8ETzBNMEugSaBH
+# hkVodHRwOi8vY3JsLm1pY3Jvc29mdC5jb20vcGtpL2NybC9wcm9kdWN0cy9NaWNU
+# aW1TdGFQQ0FfMjAxMC0wNy0wMS5jcmwwWgYIKwYBBQUHAQEETjBMMEoGCCsGAQUF
+# BzAChj5odHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpL2NlcnRzL01pY1RpbVN0
+# YVBDQV8yMDEwLTA3LTAxLmNydDAMBgNVHRMBAf8EAjAAMBMGA1UdJQQMMAoGCCsG
+# AQUFBwMIMA0GCSqGSIb3DQEBCwUAA4IBAQCN4ARqpzCuutNqY2nWJDDXj35iaidl
+# gtJ/bspYsAX8atJl19IfUKIzTuuSVU3caXZ6/YvMMYMcbsNa/4J28us23K6PWZAl
+# jIj0G8QtwDMlQHjrKnrcr4FBAz6ZqvB6SrN3/Wbb0QSK/OlxsU0mfD7z87R2JM4g
+# wKJvH6EILuAEtjwUGSB1NKm3Twrm51fCD0jxvWxzaUS2etvMPrh8DNrrHLJBR3UH
+# vg/NXS2IzdQn20xjjsW0BUAiTf+NCRpxUvu/j80Nb1++vnejibfpQJ2IlXiJdIi+
+# Hb+OL3XOr8MaDDSYOaRFAIfcoq3VPi4BkvSC8QGrvhjAZafkE7R6L5FJMIIGcTCC
+# BFmgAwIBAgIKYQmBKgAAAAAAAjANBgkqhkiG9w0BAQsFADCBiDELMAkGA1UEBhMC
+# VVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNV
+# BAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFJv
+# b3QgQ2VydGlmaWNhdGUgQXV0aG9yaXR5IDIwMTAwHhcNMTAwNzAxMjEzNjU1WhcN
+# MjUwNzAxMjE0NjU1WjB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3Rv
+# bjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0
+# aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDCCASIw
+# DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKkdDbx3EYo6IOz8E5f1+n9plGt0
+# VBDVpQoAgoX77XxoSyxfxcPlYcJ2tz5mK1vwFVMnBDEfQRsalR3OCROOfGEwWbEw
+# RA/xYIiEVEMM1024OAizQt2TrNZzMFcmgqNFDdDq9UeBzb8kYDJYYEbyWEeGMoQe
+# dGFnkV+BVLHPk0ySwcSmXdFhE24oxhr5hoC732H8RsEnHSRnEnIaIYqvS2SJUGKx
+# Xf13Hz3wV3WsvYpCTUBR0Q+cBj5nf/VmwAOWRH7v0Ev9buWayrGo8noqCjHw2k4G
+# kbaICDXoeByw6ZnNPOcvRLqn9NxkvaQBwSAJk3jN/LzAyURdXhacAQVPIk0CAwEA
+# AaOCAeYwggHiMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBTVYzpcijGQ80N7
+# fEYbxTNoWoVtVTAZBgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMAQTALBgNVHQ8EBAMC
+# AYYwDwYDVR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBTV9lbLj+iiXGJo0T2UkFvX
+# zpoYxDBWBgNVHR8ETzBNMEugSaBHhkVodHRwOi8vY3JsLm1pY3Jvc29mdC5jb20v
+# cGtpL2NybC9wcm9kdWN0cy9NaWNSb29DZXJBdXRfMjAxMC0wNi0yMy5jcmwwWgYI
+# KwYBBQUHAQEETjBMMEoGCCsGAQUFBzAChj5odHRwOi8vd3d3Lm1pY3Jvc29mdC5j
+# b20vcGtpL2NlcnRzL01pY1Jvb0NlckF1dF8yMDEwLTA2LTIzLmNydDCBoAYDVR0g
+# AQH/BIGVMIGSMIGPBgkrBgEEAYI3LgMwgYEwPQYIKwYBBQUHAgEWMWh0dHA6Ly93
+# d3cubWljcm9zb2Z0LmNvbS9QS0kvZG9jcy9DUFMvZGVmYXVsdC5odG0wQAYIKwYB
+# BQUHAgIwNB4yIB0ATABlAGcAYQBsAF8AUABvAGwAaQBjAHkAXwBTAHQAYQB0AGUA
+# bQBlAG4AdAAuIB0wDQYJKoZIhvcNAQELBQADggIBAAfmiFEN4sbgmD+BcQM9naOh
+# IW+z66bM9TG+zwXiqf76V20ZMLPCxWbJat/15/B4vceoniXj+bzta1RXCCtRgkQS
+# +7lTjMz0YBKKdsxAQEGb3FwX/1z5Xhc1mCRWS3TvQhDIr79/xn/yN31aPxzymXlK
+# kVIArzgPF/UveYFl2am1a+THzvbKegBvSzBEJCI8z+0DpZaPWSm8tv0E4XCfMkon
+# /VWvL/625Y4zu2JfmttXQOnxzplmkIz/amJ/3cVKC5Em4jnsGUpxY517IW3DnKOi
+# PPp/fZZqkHimbdLhnPkd/DjYlPTGpQqWhqS9nhquBEKDuLWAmyI4ILUl5WTs9/S/
+# fmNZJQ96LjlXdqJxqgaKD4kWumGnEcua2A5HmoDF0M2n0O99g/DhO3EJ3110mCII
+# YdqwUB5vvfHhAN/nMQekkzr3ZUd46PioSKv33nJ+YWtvd6mBy6cJrDm77MbL2IK0
+# cs0d9LiFAR6A+xuJKlQ5slvayA1VmXqHczsI5pgt6o3gMy4SKfXAL1QnIffIrE7a
+# KLixqduWsqdCosnPGUFN4Ib5KpqjEWYw07t0MkvfY3v1mYovG8chr1m1rtxEPJdQ
+# cdeh0sVV42neV8HR3jDA/czmTfsNv11P6Z0eGTgvvM9YBS7vDaBQNdrvCScc1bN+
+# NR4Iuto229Nfj950iEkSoYIC0jCCAjsCAQEwgfyhgdSkgdEwgc4xCzAJBgNVBAYT
+# AlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYD
+# VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1pY3Jvc29mdCBP
+# cGVyYXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjoz
+# MkJELUUzRDUtM0IxRDElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2Vy
+# dmljZaIjCgEBMAcGBSsOAwIaAxUA+1/CN6BILeU1yDGo+b6WkpLoQpuggYMwgYCk
 # fjB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMH
 # UmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSYwJAYDVQQD
-# Ex1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMAITMwAAASroF5b4hqfvowAA
-# AAABKjAiBCCONmvni8sIpSUVJx+juf90BvnoVDWYtbUNfZn56EPPrTANBgkqhkiG
-# 9w0BAQsFAASCAQAUqEJkObReVaVeXHT68FHE1VCSEgxVUkFpCTkM7enw4W1xpL7A
-# WrpHkILfGvR3DcxoBT1kaa5qvXrqnTstsQyaY3mmvn3FDO6LGZSz81wfvkyCkZHK
-# ua4cb5RXNeZ8oXveCCCVIkzNsRUkN9psPsJxYbvmys8UDbhnRyu/4V4hSScW65Ke
-# upBJko+9MRVqtmeYY06NQUeBUGl6ac1VBxC4N6ZhBAz2//aEhmYrO0UZhVO+XmIE
-# L5VHXCz/aIVau4bgzMKCVaWdyn19B8vRBnGci481Fjwvd6VOmwY0Wl/dgqxZd7lv
-# 4S7y7mpbUrbwKqpBg5ZPrZt5L4UXhfoncGmP
+# Ex1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDANBgkqhkiG9w0BAQUFAAIF
+# AOLvwMwwIhgPMjAyMDA4MjUyMDU0MzZaGA8yMDIwMDgyNjIwNTQzNlowdzA9Bgor
+# BgEEAYRZCgQBMS8wLTAKAgUA4u/AzAIBADAKAgEAAgIguQIB/zAHAgEAAgIRoDAK
+# AgUA4vESTAIBADA2BgorBgEEAYRZCgQCMSgwJjAMBgorBgEEAYRZCgMCoAowCAIB
+# AAIDB6EgoQowCAIBAAIDAYagMA0GCSqGSIb3DQEBBQUAA4GBAE6SnywZ+MLy7NM8
+# XY5BIf/q1793jV2EWThnhmikD03lid3Y7ivNDIwZTJy54gD4PJabSoNZ8lAehEM9
+# HhxJs3liIq9MuAIUBkupV5W8CYiPWJ/wl96op/c2u1gDGT/VUkkFGMjQnHKDWA1f
+# 6ot4Or8bTFAWaIKXO3oP+EtOeAr4MYIDDTCCAwkCAQEwgZMwfDELMAkGA1UEBhMC
+# VVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNV
+# BAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0IFRp
+# bWUtU3RhbXAgUENBIDIwMTACEzMAAAEuqNIZB5P0a+gAAAAAAS4wDQYJYIZIAWUD
+# BAIBBQCgggFKMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0B
+# CQQxIgQgthFdNEYISBIAYmdOuZXNYG4QjrXv4Tn/SzPTKY6NHzYwgfoGCyqGSIb3
+# DQEJEAIvMYHqMIHnMIHkMIG9BCDa/s3O8YhWiqpVN0kTeK+x2m0RAh17JpR6DiFo
+# TILJKTCBmDCBgKR+MHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
+# MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
+# b24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwAhMzAAAB
+# LqjSGQeT9GvoAAAAAAEuMCIEIHnEHh6MCFlCoQIMTBlBWTTqKDbSu9SEMm2n5YDh
+# 9GczMA0GCSqGSIb3DQEBCwUABIIBAAcxhPpcMmx3GwiyA+uQ6/Kr9w+wDoH53XTd
+# OzqMHZX54IR2PwAGyWPsJE7tYDSqaBmlutThFhs9OSYBwYYegpy4F7hIF5bqTsSp
+# zikjw7496pw6SmHIlCtDBASYibbPaDYMydoY2lAp2SfGNH4xYslWRja/TMEvhfaq
+# /g+0M1uYVdP8VQlFSnr7gtsOQexLiB14+mmTzb0LTuO0RP8o0X52kiYg4cUg4lZN
+# wRwR3H3LXU3UuF809EARnZpeiUJ3HdLfvst9fLTzde9bL2KtDFeEklacz+J5J3l7
+# bWSTFIO2eNOhOn8dkhqAHBDfE8dpArQdYBCNa4329XIIxAhl69Q=
 # SIG # End signature block
