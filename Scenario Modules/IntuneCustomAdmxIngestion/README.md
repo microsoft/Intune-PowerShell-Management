@@ -37,20 +37,20 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
             C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion
 
 ## Publish Windows ADMX and ADML files
-    For Example, for Google Apps:
-    ```PowerShell
-    cd "C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion"
 
-    PowerShell .\upload-admxfile.ps1 -ADMXFilePath "C:\temp\Windows-PolicyTemplates\windows.admx" -ADMLFilePath "C:\temp\Windows-PolicyTemplates\en-US\windows.adml"
-    ```
+```PowerShell
+cd "C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion"
+
+PowerShell .\upload-admxfile.ps1 -ADMXFilePath "C:\temp\Windows-PolicyTemplates\windows.admx" -ADMLFilePath "C:\temp\Windows-PolicyTemplates\en-US\windows.adml"
+```
 
 ## Publish 3rd party container ADMX and ADML files
-    For Example, for Google Apps:
-    ```PowerShell
-    cd "C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion"
+For Example, for Google Apps:
+```PowerShell
+cd "C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion"
 
-    PowerShell .\upload-admxfile.ps1 -ADMXFilePath "C:\temp\Chrome-PolicyTemplates\windows\admx\google.admx" -ADMLFilePath "C:\temp\Chrome-PolicyTemplates\windows\admx\en-US\google.adml"
-    ```
+PowerShell .\upload-admxfile.ps1 -ADMXFilePath "C:\temp\Chrome-PolicyTemplates\windows\admx\google.admx" -ADMLFilePath "C:\temp\Chrome-PolicyTemplates\windows\admx\en-US\google.adml"
+```
     
 * Enter the Intune Tenant Administrator's UPN
 * Please grant access to "Microsoft Intune PowerShell" if prompted.
