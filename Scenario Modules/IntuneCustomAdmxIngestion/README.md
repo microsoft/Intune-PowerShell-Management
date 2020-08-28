@@ -51,8 +51,9 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
 
     PowerShell .\upload-admxfile.ps1 -ADMXFilePath "C:\temp\Chrome-PolicyTemplates\windows\admx\google.admx" -ADMLFilePath "C:\temp\Chrome-PolicyTemplates\windows\admx\en-US\google.adml"
     ```
-    * Enter the Intune Tenant Administrator's UPN
-    * Please grant access to "Microsoft Intune PowerShell" if prompted.
+    
+* Enter the Intune Tenant Administrator's UPN
+* Please grant access to "Microsoft Intune PowerShell" if prompted.
 
      Note: If you see the following error, you need to work with Intune Engineering to flight your tenant:
     ``` Code
@@ -61,7 +62,7 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
     "message": "{\r\n  \"_version\": 3,\r\n  \"Message\": \"Feature disabled. - Operation ID (for customer support): 00000000-0000-0000-0000-000000000000   CustomApiErrorPhrase: FeatureDisabled\",\r\n  \"CustomApiErrorPhrase\": \"FeatureDisabled\",\r\n  \"RetryAfter\": null,\r\n  \"ErrorSourceService\": \"\",\r\n  \"HttpHeaders\": \"{}\"\r\n}"
     }
     ```
-    * On Success, you should see the following message:
+* On Success, you should see the following message:
     ``` Code
     @odata.context                   : https://graph.microsoft.com/beta/$metadata#deviceManagement/groupPolicyUploadedDefin
                                    itionFiles/$entity
@@ -81,58 +82,58 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
     defaultLanguageCode              : en-US
     groupPolicyUploadedLanguageFiles : {}
     ```
-    * Check the status of the uploaded ADMX file
+* Check the status of the uploaded ADMX file
     ``` PowerShell
     powershell .\list-uploadedadmxfiles.ps1 
     ```
     
-    * The output should list the status as follows for success:
-        ``` Code
-        displayName                      :
-        description                      :
-        languageCodes                    : {}
-        targetPrefix                     : Google2cde4efa-564a-4d8a-945a-e18bff487ab5
-        targetNamespace                  : Google.Policies
-        policyType                       : admxIngested
-        revision                         : 1.0
-        id                               : 2cde4efa-564a-4d8a-945a-e18bff487ab5
-        lastModifiedDateTime             : 2020-08-28T21:36:34.6180335Z
-        fileName                         : google.admx
-        status                           : available
-        content                          :
-        uploadDateTime                   : 0001-01-01T00:00:00Z
-        defaultLanguageCode              : en-US
-        groupPolicyUploadedLanguageFiles : {}
-        ```        
+* The output should list the status as follows for success:
+    ``` Code
+    displayName                      :
+    description                      :
+    languageCodes                    : {}
+    targetPrefix                     : Google2cde4efa-564a-4d8a-945a-e18bff487ab5
+    targetNamespace                  : Google.Policies
+    policyType                       : admxIngested
+    revision                         : 1.0
+    id                               : 2cde4efa-564a-4d8a-945a-e18bff487ab5
+    lastModifiedDateTime             : 2020-08-28T21:36:34.6180335Z
+    fileName                         : google.admx
+    status                           : available
+    content                          :
+    uploadDateTime                   : 0001-01-01T00:00:00Z
+    defaultLanguageCode              : en-US
+    groupPolicyUploadedLanguageFiles : {}
+    ```        
     
-    * If an upload fails, use this command to get more information about error.
+* If an upload fails, use this command to get more information about error.
     ``` PowerShell
     powershell .\list-uploadedadmxfiles.ps1 -FileId "a8de1c49-34d2-41e5-b798-da7c6f3709ca" 
     ```
 
-    * The output will be something like the following for errors:
-        ``` Code
-        displayName                      :
-        description                      :
-        languageCodes                    : {}
-        targetPrefix                     :
-        targetNamespace                  :
-        policyType                       : admxIngested
-        revision                         :
-        id                               : a8de1c49-34d2-41e5-b798-da7c6f3709ca
-        lastModifiedDateTime             : 2020-08-28T20:51:04.0379614Z
-        fileName                         : google.admx
-        status                           : uploadFailed
-        content                          :
-        uploadDateTime                   : 0001-01-01T00:00:00Z
-        defaultLanguageCode              : en-US
-        groupPolicyUploadedLanguageFiles : {}
-        groupPolicyOperations            : {@{operationType=upload; operationStatus=failed; statusDetails=localizedStringValue
-                                        cannot be null; id=ab937f1a-4d0a-4320-9adc-55cc7d61ca45;
-                                        lastModifiedDateTime=2020-08-28T20:51:04.0692062Z}}
-        ```
+* The output will be something like the following for errors:
+    ``` Code
+    displayName                      :
+    description                      :
+    languageCodes                    : {}
+    targetPrefix                     :
+    targetNamespace                  :
+    policyType                       : admxIngested
+    revision                         :
+    id                               : a8de1c49-34d2-41e5-b798-da7c6f3709ca
+    lastModifiedDateTime             : 2020-08-28T20:51:04.0379614Z
+    fileName                         : google.admx
+    status                           : uploadFailed
+    content                          :
+    uploadDateTime                   : 0001-01-01T00:00:00Z
+    defaultLanguageCode              : en-US
+    groupPolicyUploadedLanguageFiles : {}
+    groupPolicyOperations            : {@{operationType=upload; operationStatus=failed; statusDetails=localizedStringValue
+                                    cannot be null; id=ab937f1a-4d0a-4320-9adc-55cc7d61ca45;
+                                    lastModifiedDateTime=2020-08-28T20:51:04.0692062Z}}
+    ```
 ## Publish app specificADMX and ADML files
-    * For example: Chrome
+* For example: Chrome
     ```PowerShell
     cd "C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion"
 
