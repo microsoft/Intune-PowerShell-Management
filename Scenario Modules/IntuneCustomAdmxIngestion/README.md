@@ -143,10 +143,10 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
     At this point you have the ADMX template for Chrome in your tenant
 
 ## Check status of ADMX file upload:
-    ```PowerShell
-    .\list-uploadedadmxfiles.ps1
-    ```
-    Once the status is “Available” all settings will be available in tree view Intune UX, to create policies
+```PowerShell
+.\list-uploadedadmxfiles.ps1
+```
+Once the status is “Available” all settings will be available in tree view Intune UX, to create policies
  
 # Configuring the uploaded settings
 Follow the instructions in this document: https://docs.microsoft.com/en-us/mem/intune/configuration/administrative-templates-windows
