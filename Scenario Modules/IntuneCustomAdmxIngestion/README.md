@@ -144,7 +144,7 @@ PowerShell .\upload-admxfile.ps1 -ADMXFilePath "C:\temp\Chrome-PolicyTemplates\w
 
 ## Check status of ADMX file upload:
 ```PowerShell
-.\list-uploadedadmxfiles.ps1
+powershell .\list-uploadedadmxfiles.ps1
 ```
 Once the status is “Available” all settings will be available in tree view Intune UX, to create policies
  
@@ -155,7 +155,7 @@ When selecting settings to configure, you will see your uploaded configurations 
 
 # To remove the uploaded ADMX templates.
 ```PowerShell
-.\remove-uploadedadmxfile.ps1 -Environment OneDF -FileIdToRemove <fileId>
+powershell .\remove-uploadedadmxfile.ps1 -Environment OneDF -FileIdToRemove <fileId>
 ```
 All applied settings needs to be unconfigured, before a file can be removed. 
 
