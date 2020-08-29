@@ -30,11 +30,11 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
         Download and unzip it to local folder e.g. C:\temp\Chrome-PolicyTemplates
 
 ## Download ADMX Publishing PowerShell scripts from Github 
-    * Download the Github repo zip file: https://github.com/microsoft/Intune-PowerShell-Management/archive/ADMXCustomIngestion.zip 
-        * extract it to local folder e.g. C:\temp\Github
-        * The ADMX Publishing scripts will be here: 
+* Download the Github repo zip file: https://github.com/microsoft/Intune-PowerShell-Management/archive/ADMXCustomIngestion.zip 
+* extract it to local folder e.g. C:\temp\Github
+* The ADMX Publishing scripts will be here: 
             
-            C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion
+    C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion
 
 ## Publish Windows ADMX and ADML files
 
