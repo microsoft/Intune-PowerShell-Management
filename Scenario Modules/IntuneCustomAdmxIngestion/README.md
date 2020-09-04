@@ -1,20 +1,20 @@
 
 # Overview 
-Microsoft Endpoint Manager currently has the capability to managed ADMX settings for Edge, Office, and a subset of MDM relevant Windows features. We have built, based on customer feedback, the ability for an admin to upload their own ADMX packages. 
+Microsoft Endpoint Manager currently has the capability to manage ADMX settings for Edge, Office, and a subset of MDM-relevant Windows features. We have built, based on customer feedback, the ability for an admin to upload their own ADMX packages. 
 
 With this feature, not only are the setting configurations deployed to targeted devices, but the ADMX and ADML files as well. 
 
-This allows an IT admin to lay down app configuration before app install as the ADMX is installed beforehand. The uploaded files will also appear in the admin console with easy to use configuration.
+This allows an IT admin to lay down app configuration before app install as the ADMX is installed beforehand. The uploaded files will also appear in the admin console with easy-to-use configuration.
 
 
 # Notes for the preview 
 The following should be considered for the preview and are subject to change in future iterations.
 1.  There is a maximum of 10 packages that can be uploaded
 2.  There is a file limit of 1mb
-3.  Uploading the ADMX that already exists in the admin console will result in duplicate settings in the MEM admin console.
+3.  Uploading an ADMX that already exists in the admin console will result in duplicate settings in the MEM admin console.
 4.  The upload is available in graph and will be accessible without UX for the preview timeframe.
 5.  Removing an ADMX package will require removing any settings configured in profiles before removal.
-6.  An ADMX package may have pre-requisites that must be uploaded first. For example, chrome.admx requires first google.admx and windows.admx.
+6.  An ADMX package may have prerequisites that must be uploaded first. For example, chrome.admx requires first google.admx and windows.admx.
 7.  Only 1 ADML file can be uploaded per ADMX file. This means each package will support 1 language for now.
 8.  AMDX files with unsupported setting types will fail at upload. For example, combo box settings.
 
@@ -31,7 +31,7 @@ This procedure will walk you through uploading an ADMX/ADML package, listing the
 
 ## Download ADMX Publishing PowerShell scripts from Github 
 * Download the Github repo zip file: https://github.com/microsoft/Intune-PowerShell-Management/archive/ADMXCustomIngestion.zip 
-* extract it to local folder e.g. C:\temp\Github
+* Extract it to a local folder e.g. C:\temp\Github
 * The ADMX Publishing scripts will be here: 
             
     C:\temp\Github\Intune-PowerShell-Management-ADMXCustomIngestion\Scenario Modules\IntuneCustomAdmxIngestion
