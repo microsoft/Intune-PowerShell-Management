@@ -69,6 +69,7 @@ Function Get-GPOMigrationReportCollection
                 # Get the groupPolicySettingMappings for each migrationReport
                 $groupPolicyObjectId = $migrationReport.groupPolicyObjectId
                 $ou = [System.Web.HTTPUtility]::UrlDecode($migrationReport.ouDistinguishedName)
+                Write-Log -Message "Get-GPOMigrationReportCollection: $($groupPolicyObjectId)_$($ou)"
 
                 If ($ExpandSettings)
                 {
@@ -100,7 +101,7 @@ Function Get-GPOMigrationReportCollection
                 $exception  = $_
                 Write-Log -Message "Get-GPOMigrationReportCollection: Failure: $($exception)" -Level "Warn"
             }
-        }
+        }                
     }
     Catch
     {
@@ -156,11 +157,11 @@ Function Get-MigrationReadinessReport
         <#
             1. Ask to create the report
             Post https://graph.microsoft-ppe.com/testppebeta_intune_onedf/deviceManagement/reports/cachedReportConfigurations
-            Payload: {"id":"GPAnalyticsMigrationReadiness_00000000-0000-0000-0000-000000000001","filter":"","orderBy":[],"select":["SettingName","MigrationReadiness","OSVersion","Scope","ProfileType","SettingCategory"],"metadata":""}
+            Payload: {"id":"GPAnalyticsSettingMigrationReadiness_00000000-0000-0000-0000-000000000001","filter":"","orderBy":[],"select":["SettingName","SettingCategory","MigrationReadiness","OSVersion","Scope","ProfileType"],"metadata":""}
         #>
         $uri = "$($script:GraphConfiguration.GraphBaseAddress)/$($script:GraphConfiguration.SchemaVersion)/deviceManagement/reports/cachedReportConfigurations";        
         $Body = "{            
-            `"id`":`"GPAnalyticsMigrationReadiness_00000000-0000-0000-0000-000000000001`",
+            `"id`":`"GPAnalyticsSettingMigrationReadiness_00000000-0000-0000-0000-000000000001`",
             `"filter`": `"`",`
             `"select`": [`
             `"SettingName`",`"MigrationReadiness`",`"OSVersion`",`"Scope`",`"ProfileType`",`"SettingCategory`"
@@ -168,7 +169,7 @@ Function Get-MigrationReadinessReport
             `"orderBy`": [`
                 `"SettingCategory`"
             ]`
-          }"
+          }"          
         $clonedHeaders["content-length"] = $Body.Length;
 
         Try
@@ -210,11 +211,11 @@ Function Get-MigrationReadinessReport
         <#
             3. Get the actual report: (you may want to increase 'top')
             Post: https://graph.microsoft-ppe.com/testppebeta_intune_onedf/deviceManagement/reports/getCachedReport
-            Payload: {"Id":"GPAnalyticsMigrationReadiness_00000000-0000-0000-0000-000000000001","Skip":0,"Top":50,"Search":"","OrderBy":[],"Select":["SettingName","MigrationReadiness","OSVersion","Scope","ProfileType","SettingCategory"]}
+            Payload: {"Id":"GPAnalyticsSettingMigrationReadiness_00000000-0000-0000-0000-000000000001","GroupBy":["ProfileType"],"Select":["ProfileType"]}
         #>
         $uri = "$($script:GraphConfiguration.GraphBaseAddress)/$($script:GraphConfiguration.SchemaVersion)/deviceManagement/reports/getCachedReport";        
         $Body = "{            
-            `"id`":`"GPAnalyticsMigrationReadiness_00000000-0000-0000-0000-000000000001`",
+            `"id`":`"GPAnalyticsSettingMigrationReadiness_00000000-0000-0000-0000-000000000001`",
             `"skip`": `"0`",`
             `"Search`": `"`",`
             `"select`": [`
@@ -552,6 +553,12 @@ Function Initialize-IPAClientConfiguration
             (New-Item -ItemType directory -Path $script:IPAClientConfiguration.StatePath) | Out-Null
         }
 
+        # Create GPO Backup folder path if necessary        
+        If(!(Test-Path -Path "$($script:IPAClientConfiguration.GpoBackupFolderPath)" ))
+        {
+            (New-Item -ItemType directory -Path $script:IPAClientConfiguration.GpoBackupFolderPath) | Out-Null
+        }
+        
         # Import pre-requisite modules
         Import-PreRequisiteModuleList
 
@@ -725,7 +732,7 @@ Function Add-GPToIntuneAdmxMigratedProfile
                 }
 
                 $SettingsForAdmxProfile+=($SettingBody)
-        }
+         }
 
         try 
         {        
@@ -762,12 +769,13 @@ Function Add-GPToIntuneAdmxMigratedProfile
                     deletedIds = @();`
                     }
 
-            $unescapedContainerBody = ( ConvertTo-Json $admxUpdateContainerBody -depth 10 | % { [regex]::Unescape($_) })
-
+            $unescapedContainerBody = ( ConvertTo-Json $admxUpdateContainerBody -depth 10 | ForEach-Object { [regex]::Unescape($_) })
             $admxUpdateContainerUri =   "$($GraphConfiguration.GraphBaseAddress)/$($GraphConfiguration.SchemaVersion)/deviceManagement/groupPolicyConfigurations('$($admxProfile.Id)')/updateDefinitionValues"
-            Write-Log -Message "Uri to update profile: . $($admxUpdateContainerUri)"
-            $updatedConfiguration = (Add-IntuneEntityCollection -Body $unescapedContainerBody -uri $admxUpdateContainerUri -GraphConfiguration $script:GraphConfiguration)
-            Write-Log -Message "Profile updated successfully"
+
+            Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Add-IntuneEntityCollection -Body: $($unescapedContainerBody))  -uri: $($admxUpdateContainerUri)"
+            $updatedConfiguration = (Add-IntuneEntityCollection -Body ($unescapedContainerBody | ConvertTo-Json -Depth 10) -uri $admxUpdateContainerUri -GraphConfiguration $script:GraphConfiguration)
+
+            Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Profile updated successfully"
         }
         catch
         {
@@ -775,8 +783,7 @@ Function Add-GPToIntuneAdmxMigratedProfile
             Write-Host $exception
             Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Failure: $($exception)"  
             throw
-        }      
-
+        }         
     }
     Catch
     {
@@ -793,7 +800,7 @@ Function Add-GPToIntuneAdmxMigratedProfile
         Write-Log -Message "Add-GPToIntuneAdmxMigratedProfile: Elapsed time = $($sw.Elapsed.ToString())"
     }
    
-
+    return $updatedConfiguration
 }
 
 Function ProcessAdmxChildrenForPresentation ($ChildIdList, $ParentAdmxDefinitionId) {
@@ -847,9 +854,9 @@ Function ProcessAdmxChildrenForPresentation ($ChildIdList, $ParentAdmxDefinition
                 $listArray = ConvertFrom-Json $childSetting.settingValue;
                 $listArray.GetEnumerator() | ForEach-Object { 
 
-                    if($_.name -eq $null){
+                    if($null -eq $_.name){
                         $listitem = [PSCustomObject]@{`
-                                "name" = $_.Data;`                    
+                                "name" = $_.Data;`
                         }
 
                         $value += $listitem
@@ -857,12 +864,12 @@ Function ProcessAdmxChildrenForPresentation ($ChildIdList, $ParentAdmxDefinition
                     else
                     {
                         $listitem = [PSCustomObject]@{`
-                                "name" = $_.Name;`
+                                "name" = $_.name;`
                                 "value" = $_.Data                    
                         }
 
                         $value += $listitem
-                    }                            
+                    }                          
                 }
                         
             }
@@ -874,11 +881,10 @@ Function ProcessAdmxChildrenForPresentation ($ChildIdList, $ParentAdmxDefinition
                     $odataType = "#microsoft.graph.omaSettingString";
                     $value = $($childSetting.settingValue);
             }
-                   
-                   
+
             Default {
-                    $odataType = $($childSetting.settingValueType);
-                    $value = $($childSetting.settingValue);
+                    $odataType = $($childSetting.settingValueType);                
+                    $value = $($childSetting.settingValue);                                       
             }
         }
 
@@ -1014,13 +1020,13 @@ Function Add-GPToIntuneMigratedProfile
 
             try 
             {
-                Write-Log -Message "Add-GPToIntuneMigratedProfile: Creating Profile: $($customOMAProfile.displayName)... "
+                Write-Log -Message "Add-GPToIntuneMigratedProfile: Creating Profile: $($customOMAProfile.displayName)... "                
                 $DCProfileCollection+= (Add-IntuneEntityCollection -Body ($customOMAProfile | ConvertTo-Json) -uri $DCUri -GraphConfiguration $script:GraphConfiguration)
             }
             catch 
             {
                 $exception  = $_
-                Write-Log -Message "Add-GPToIntuneMigratedProfile: Failure: $($exception)"
+                Write-Log -Message "Add-GPToIntuneMigratedProfile: Failure: $($exception)"                
             }            
             
             #
@@ -1044,6 +1050,43 @@ Function Add-GPToIntuneMigratedProfile
     }
 }
 
+#region Logging Utilities
+function Write-Log
+{
+    Param
+    (
+        [Parameter(Mandatory=$true,
+                   ValueFromPipelineByPropertyName=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Message,
+        [Parameter(Mandatory=$false)]
+        [string]$Level="Info",
+        [Parameter(Mandatory=$false)]
+        [string]$LogPath = "$($script:IPAClientConfiguration.LogFilePath)"
+    )
+
+    # Format Date for our Log File
+    $currentDateTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+    # Write message to error, warning, or verbose pipeline and specify $LevelText
+    switch ($Level)
+    {
+        'Error'
+        {
+            $logLine = "[$($currentDateTime)] ERROR: $($Message)"
+            Write-Error $logLine
+        }       
+        Default
+        {
+            $logLine = "[$($currentDateTime)] INFO: $($Message)"
+            Write-Progress -Activity "IntunePolicyAnalytics" -PercentComplete -1 -Status $logLine
+        }
+    }
+
+    # Write log entry to $Path
+    $logLine | Out-File -FilePath $LogPath -Append
+}
+#endregion
 
 Export-ModuleMember -Function Add-GPToIntuneAdmxMigratedProfile
 Export-ModuleMember -Function Add-ChromeToEdgeMigratedProfile
@@ -1054,6 +1097,7 @@ Export-ModuleMember -Function Update-MigrationReadinessReport
 Export-ModuleMember -Function Import-GPOCollection
 Export-ModuleMember -Function Initialize-IPAClientConfiguration
 Export-ModuleMember -Function Remove-GPOMigrationReportCollection
+Export-ModuleMember -Function Write-Log
 #endregion Cmdlets
 
 #region Configuration Utilities
@@ -1113,44 +1157,6 @@ Function Import-PreRequisiteModuleList
         Write-Log -Message "Import-PreRequisiteModuleList failed. Failure: $($exception)" -Level "Error"
         throw
     }
-}
-#endregion
-
-#region Logging Utilities
-function Write-Log
-{
-    Param
-    (
-        [Parameter(Mandatory=$true,
-                   ValueFromPipelineByPropertyName=$true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Message,
-        [Parameter(Mandatory=$false)]
-        [string]$Level="Info",
-        [Parameter(Mandatory=$false)]
-        [string]$LogPath = "$($script:IPAClientConfiguration.LogFilePath)"
-    )
-
-    # Format Date for our Log File
-    $currentDateTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-
-    # Write message to error, warning, or verbose pipeline and specify $LevelText
-    switch ($Level)
-    {
-        'Error'
-        {
-            $logLine = "[$($currentDateTime)] ERROR: $($Message)"
-            Write-Error $logLine
-        }       
-        Default
-        {
-            $logLine = "[$($currentDateTime)] INFO: $($Message)"
-            Write-Progress -Activity "IntunePolicyAnalytics" -PercentComplete -1 -Status $logLine
-        }
-    }
-
-    # Write log entry to $Path
-    $logLine | Out-File -FilePath $LogPath -Append
 }
 #endregion
 
@@ -1251,7 +1257,7 @@ function Initialize-GraphConfiguration
             IPARoute = "deviceManagement/groupPolicyMigrationReports"; `
             AppId = "$($IntunePowerShellclientId)"; `
             RedirectLink = "$($IntunePowerShellRedirectUri)"; `
-            SchemaVersion = "stagingbeta"; `
+            SchemaVersion = "beta"; `
             TenantAdminUPN = "$($TenantAdminUPN)";
             AuthHeader = $null;
             platformParameters = $null;
@@ -1612,14 +1618,15 @@ Function Get-GPOReportXmlCollectionFromAD
                         If (!$gpoMigrationReportCollection.Contains($gpoReportXmlKey))
                         {
                             [Xml]$gpoReportXml = (Get-GPOReport -Guid $gpoGuid -ReportType Xml -Domain $ADDomain -ErrorAction Stop)
+                            $gpoReportXml.InnerXml | Out-File -FilePath "$($IPAClientConfiguration.GpoBackupFolderPath)\$($gpoReportXmlKey).xml"
                             $bytes = [System.Text.Encoding]::UNICODE.GetBytes($gpoReportXml.InnerXml)
                             $encodedText = [Convert]::ToBase64String($bytes)
-                            $gpoReportXmlCollection.Add($gpoReportXmlKey, [PSCustomObject]@{ouDistinguishedName = $ou.DistinguishedName; content = $encodedText})
-                            Write-Log -Message "Get-GPOReportXmlCollectionFromAD:  Backed up GPO Guid=$($gpoGuid), $($ou.DistinguishedName)"
+                            $gpoReportXmlCollection.Add($gpoReportXmlKey, [PSCustomObject]@{ouDistinguishedName = $ou.Name; content = $encodedText})
+                            Write-Log -Message "Get-GPOReportXmlCollectionFromAD:  Backed up GPO Guid=$($gpoGuid), $($ou.Name)"
                         }
                         Else
                         {
-                            Write-Log -Message "Get-GPOReportXmlCollectionFromAD:  GPO Guid=$($gpoGuid), $($ou.DistinguishedName) previously uploaded"
+                            Write-Log -Message "Get-GPOReportXmlCollectionFromAD:  GPO Guid=$($gpoGuid), $($ou.Name) previously uploaded"
                         }
                     }
                     Catch
@@ -1648,8 +1655,8 @@ Function Get-GPOReportXmlCollectionFromAD
 # SIG # Begin signature block
 # MIIjewYJKoZIhvcNAQcCoIIjbDCCI2gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCVhvg+FHGMvpn
-# 0Khib4aJSYan5F/69wfPEDsIafui2KCCDXYwggX0MIID3KADAgECAhMzAAABhk0h
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNshEYvRaQ80Hp
+# ekJnIXUyAuFko31nWqr39cfZMaigyaCCDXYwggX0MIID3KADAgECAhMzAAABhk0h
 # daDZB74sAAAAAAGGMA0GCSqGSIb3DQEBCwUAMH4xCzAJBgNVBAYTAlVTMRMwEQYD
 # VQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNy
 # b3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNpZ25p
@@ -1726,50 +1733,50 @@ Function Get-GPOReportXmlCollectionFromAD
 # aWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNp
 # Z25pbmcgUENBIDIwMTECEzMAAAGGTSF1oNkHviwAAAAAAYYwDQYJYIZIAWUDBAIB
 # BQCgga4wGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEO
-# MAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEINhLj2UfcKJuzM8ELl0gthjY
-# dlEIt+p7E0BoNnAhDD0YMEIGCisGAQQBgjcCAQwxNDAyoBSAEgBNAGkAYwByAG8A
+# MAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEIIO9eUaLpowZB9bASIqIAzls
+# 4Ep6pjF1mAxUq7RtmiMgMEIGCisGAQQBgjcCAQwxNDAyoBSAEgBNAGkAYwByAG8A
 # cwBvAGYAdKEagBhodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20wDQYJKoZIhvcNAQEB
-# BQAEggEAG++J7DOyArkmQ2o4l5NkTPgFaCP6NEWYjO1nTonYYBnabq4Fx0WUbhqi
-# le15Df4N974ITDWhVOoY5KpXtPjVBs29L1s7fdQ3F79mP4sbufZvCe9WOseqgK8S
-# Uz58BoNO8qED5jx+JFFG1dss6Uww5CEAhpd7DuVEnfAyMQgktTBtvumPOqJgvB0v
-# 3LqKuxXIIYOigIAxLEF6x9dood0WJ3REhRiwKHoL/pEkxHpbyeSro5bACJPkWuAm
-# PHTzpdC63hAuzZgPsnsw4YDjIIZWskZ0qlzSwc28AGCrqYn0LwOx9KWv6yojrTq+
-# 4JKz1tIjGualFRYB0s8+JDceiTt9JKGCEuUwghLhBgorBgEEAYI3AwMBMYIS0TCC
+# BQAEggEAp2zX7XAJqu3MqI/kbaYt2Gi+fOgEYAo2cyA5nr8JajZF4bfE1SIsdvqe
+# MVnsFPNoWH+EW/+HduzzohsY2S66Xar8aOuc8dFqtlOb8B01GayRw/Tk4kqKEALT
+# 9UTXc2ubmVVWa7ovsaCkkcqAZjd9uCrAmsd8DYxvpI+ZsCBcyJKPy5euYegU9L3u
+# A2fqvmW18baY970PR5S/1WXPlnIqBpw+KfnxokgJtSlpKOQOc5yTTmg1IMNOGoPJ
+# N4TI3z1r8pzTI2vn+Qko4PNi3sn70qkxWmVyp8sJgwxAC4bWUxkHvxsRipadmLBv
+# U+XmSBl34t9k5KmgXXj65RJggFndV6GCEuUwghLhBgorBgEEAYI3AwMBMYIS0TCC
 # Es0GCSqGSIb3DQEHAqCCEr4wghK6AgEDMQ8wDQYJYIZIAWUDBAIBBQAwggFRBgsq
 # hkiG9w0BCRABBKCCAUAEggE8MIIBOAIBAQYKKwYBBAGEWQoDATAxMA0GCWCGSAFl
-# AwQCAQUABCDPfXECWhjtGudLjjBareTEhi0ICaS0mBFFL5I3Q+N8igIGX1/7Q1FK
-# GBMyMDIwMDkyNDIzMTMyMC45NzZaMASAAgH0oIHQpIHNMIHKMQswCQYDVQQGEwJV
+# AwQCAQUABCAxqcfOyTx27ypopS+n4o3BBscJb2rV8eVgwkshPud9lwIGX4by+pt9
+# GBMyMDIwMTAyNDAwMTgyOC4wODNaMASAAgH0oIHQpIHNMIHKMQswCQYDVQQGEwJV
 # UzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UE
 # ChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSUwIwYDVQQLExxNaWNyb3NvZnQgQW1l
-# cmljYSBPcGVyYXRpb25zMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjpFNUE2LUUy
-# N0MtNTkyRTElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2VydmljZaCC
-# DjwwggTxMIID2aADAgECAhMzAAABFXQs/TBeLcb6AAAAAAEVMA0GCSqGSIb3DQEB
+# cmljYSBPcGVyYXRpb25zMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjo3QkYxLUUz
+# RUEtQjgwODElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2VydmljZaCC
+# DjwwggTxMIID2aADAgECAhMzAAABH04lzawK9LgfAAAAAAEfMA0GCSqGSIb3DQEB
 # CwUAMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQH
 # EwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xJjAkBgNV
-# BAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwMB4XDTE5MTExMzIxNDAz
-# M1oXDTIxMDIxMTIxNDAzM1owgcoxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNo
+# BAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwMB4XDTE5MTExMzIxNDA0
+# MVoXDTIxMDIxMTIxNDA0MVowgcoxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNo
 # aW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29y
 # cG9yYXRpb24xJTAjBgNVBAsTHE1pY3Jvc29mdCBBbWVyaWNhIE9wZXJhdGlvbnMx
-# JjAkBgNVBAsTHVRoYWxlcyBUU1MgRVNOOkU1QTYtRTI3Qy01OTJFMSUwIwYDVQQD
+# JjAkBgNVBAsTHVRoYWxlcyBUU1MgRVNOOjdCRjEtRTNFQS1CODA4MSUwIwYDVQQD
 # ExxNaWNyb3NvZnQgVGltZS1TdGFtcCBTZXJ2aWNlMIIBIjANBgkqhkiG9w0BAQEF
-# AAOCAQ8AMIIBCgKCAQEAwBGQeTaNPkBkPl0qUvzGnTA+EDq2izI4ZjIf05f7hTip
-# Nov8b7AYH0C27yheHlv2d3ifKm5KUfLVxiSWNnNnsY0wcEIOAGTjRoZQ4bxEMSfl
-# aL3EvOgBmg3zw8hfuk7MDBShCgYNf5D2yiMQjsJIjvHwEB1dRy3NLgk8RsRqnPwI
-# pPgOZEteoDNUse9OqTkcR78kD9F83KlpM390nPvCRR1evSQxiXox8kOt5zLQ258A
-# okD0tc73FMl3ioVADa5eFuGOJuMOf7DuuC1KC7iRHtXp9cxHYfWAPEM/zhW0ePqj
-# +sOi25xGcBzGU2bD0BMCFPbGefLrnz+5G/bJ7ZNMxQIDAQABo4IBGzCCARcwHQYD
-# VR0OBBYEFGpLDu7AzyPX+GfAP/+tQaDgAUeiMB8GA1UdIwQYMBaAFNVjOlyKMZDz
+# AAOCAQ8AMIIBCgKCAQEApUwPzFb3PxyMf046MLWFCtFwlCpzu1wPi26cp0QYxa19
+# ybbPnDF+1xljQ1p6pXj+hPLTQIgsV/xLAnDoKnRGmq37L4eSVSXgMmCTDaZLZUwJ
+# i3DysQgdCX8uwo+cnlfGfFCZ0OzTIVgjt4wa1oWtqkg0eJ+/h4CeiGfdSfrz9Ds9
+# o/zn8VWpfzscW7vHFjAmT3XkATl3Z1UIVxibSDhOGS+fNEb8twd24Rn+qBpitRqV
+# LbJGfLakIMj9cORXXhvYWGyCQfyuPmWPKaQ194iZiqWL/s/9CWW5+381++7ORa9a
+# qtOmDyRCTVDvGtLTIZnsA/WID7SQVxXgq8u5YtsIswIDAQABo4IBGzCCARcwHQYD
+# VR0OBBYEFBWjHwA6MBNjBDdlIlsrwTaJ+uDAMB8GA1UdIwQYMBaAFNVjOlyKMZDz
 # Q3t8RhvFM2hahW1VMFYGA1UdHwRPME0wS6BJoEeGRWh0dHA6Ly9jcmwubWljcm9z
 # b2Z0LmNvbS9wa2kvY3JsL3Byb2R1Y3RzL01pY1RpbVN0YVBDQV8yMDEwLTA3LTAx
 # LmNybDBaBggrBgEFBQcBAQROMEwwSgYIKwYBBQUHMAKGPmh0dHA6Ly93d3cubWlj
 # cm9zb2Z0LmNvbS9wa2kvY2VydHMvTWljVGltU3RhUENBXzIwMTAtMDctMDEuY3J0
 # MAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwgwDQYJKoZIhvcNAQEL
-# BQADggEBAFApgvMA07LzV31WSA3ibnPDGsiJsNBkdHreMBq+XZccH/D2PqMf+Dlg
-# E98NNTXzVyp/qe7g8HYC9BAnMa72jp2z25LKawhv8Bh54fw/T8pG/+U3GvCwO6rt
-# Ln2djpvGAjaDEUcxLt4biHxKcog8DXgR9TNx7RW9Zdui7vZ9Dxf/3kMsbpn/qmVz
-# LlQjPSLENoKYQcwpyxpU2AXCljKyhf5SNrmag3Pz9Bo+mduTPYw5kb/slCrUIBjA
-# CqKqJfBUsBNvrvgKxezdwFq4iJJ9HoI86r9SUkEnLmyJiWuOUN8RxlbaIL3hD9H7
-# d+G24fk9O7iM5DxCCydGIVg4Xq3KdoQwggZxMIIEWaADAgECAgphCYEqAAAAAAAC
+# BQADggEBAJjRR8DcZOLKYqvJzonPUcQsC9l/Pwu94Mv+7l8X1BW2+zKEqADT9ogJ
+# D3Op7cAg3x3x6baEL6qw4hwOCU3dWUEmxAS6hO6Wd8Fdi/oUZlM4qesCiX91DZ5P
+# 9xXiEDz1UXQxbZkY/KgegJAI4COyQItpLylGgmmx58X1y5gYUUmlzEHYwCe3UYLC
+# m6AE2qN+/TQ51hylim7BNR6s2wqIEJgFLGy11ZgSJOi5tQ5BqLOh+wItYRqroZR0
+# QINNTZ0+KV0qymbanYqIMifGbc5M9fNc+f2RNnG4MZvMAfsIUVlq/3MhrWN/kDKg
+# vt7vx0LI/Ofg1lcFPFPjwfuKzYtqbEQwggZxMIIEWaADAgECAgphCYEqAAAAAAAC
 # MA0GCSqGSIb3DQEBCwUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGlu
 # Z3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUm9vdCBDZXJ0aWZpY2F0ZSBBdXRo
@@ -1807,33 +1814,33 @@ Function Get-GPOReportXmlCollectionFromAD
 # MIICNwIBATCB+KGB0KSBzTCByjELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hp
 # bmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jw
 # b3JhdGlvbjElMCMGA1UECxMcTWljcm9zb2Z0IEFtZXJpY2EgT3BlcmF0aW9uczEm
-# MCQGA1UECxMdVGhhbGVzIFRTUyBFU046RTVBNi1FMjdDLTU5MkUxJTAjBgNVBAMT
-# HE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZpY2WiIwoBATAHBgUrDgMCGgMVAB/A
-# Ak7UBCo4uQF6YgolX7VcjB77oIGDMIGApH4wfDELMAkGA1UEBhMCVVMxEzARBgNV
+# MCQGA1UECxMdVGhhbGVzIFRTUyBFU046N0JGMS1FM0VBLUI4MDgxJTAjBgNVBAMT
+# HE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZpY2WiIwoBATAHBgUrDgMCGgMVANQv
+# RJa2WvwYqkrR2BYDDosSXkkMoIGDMIGApH4wfDELMAkGA1UEBhMCVVMxEzARBgNV
 # BAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jv
 # c29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0IFRpbWUtU3RhbXAg
-# UENBIDIwMTAwDQYJKoZIhvcNAQEFBQACBQDjFv/JMCIYDzIwMjAwOTI0MTkyMTQ1
-# WhgPMjAyMDA5MjUxOTIxNDVaMHcwPQYKKwYBBAGEWQoEATEvMC0wCgIFAOMW/8kC
-# AQAwCgIBAAICLTQCAf8wBwIBAAICEcwwCgIFAOMYUUkCAQAwNgYKKwYBBAGEWQoE
+# UENBIDIwMTAwDQYJKoZIhvcNAQEFBQACBQDjPU6lMCIYDzIwMjAxMDIzMjA0NDIx
+# WhgPMjAyMDEwMjQyMDQ0MjFaMHcwPQYKKwYBBAGEWQoEATEvMC0wCgIFAOM9TqUC
+# AQAwCgIBAAICEpwCAf8wBwIBAAICEZ8wCgIFAOM+oCUCAQAwNgYKKwYBBAGEWQoE
 # AjEoMCYwDAYKKwYBBAGEWQoDAqAKMAgCAQACAwehIKEKMAgCAQACAwGGoDANBgkq
-# hkiG9w0BAQUFAAOBgQBFj7Bz0lwOL2Ka8vsEYXuMO0AIOc55e2IPL0TVt31Vae1s
-# arNcZrkUhvg+HZSUxVOvmX9waZbj61+nKNNe8dPZunAPgeZcl2dSAVcQ3osdC7Gt
-# 10SaWjmU3U8KtdeHFUQJydckb6t80OdxkAKcxQ9o/zRjX9Vpin84hV0OfZV2zjGC
+# hkiG9w0BAQUFAAOBgQCibhGRQNCKW2Iff59fromyz2ApVfqAHRFsqoZ9F4ChZsOn
+# ncALtVKAjXj4knMYKl0yzPV9XmxZ8j3m53tpLeO5IQt3HNczgaIbeygQFRRKHxEB
+# R2hpXgXkshIcpn20iDvQ7z4TuZEPtzKR6n5GUDsxPoqP8lnusUuNNhTpTaByzDGC
 # Aw0wggMJAgEBMIGTMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwAhMzAAAB
-# FXQs/TBeLcb6AAAAAAEVMA0GCWCGSAFlAwQCAQUAoIIBSjAaBgkqhkiG9w0BCQMx
-# DQYLKoZIhvcNAQkQAQQwLwYJKoZIhvcNAQkEMSIEIM2gndY5AOv/o09fDs0ZRwg+
-# WvuUDai+rC3JcjoWg7AXMIH6BgsqhkiG9w0BCRACLzGB6jCB5zCB5DCBvQQgcNQo
-# /V8htetZk5AoUTemCSDsqeFydtC99oSXfQr6MOQwgZgwgYCkfjB8MQswCQYDVQQG
+# H04lzawK9LgfAAAAAAEfMA0GCWCGSAFlAwQCAQUAoIIBSjAaBgkqhkiG9w0BCQMx
+# DQYLKoZIhvcNAQkQAQQwLwYJKoZIhvcNAQkEMSIEIAUWXvO55ZfT1sWtvdXNB0NK
+# RwVebUHG2qp8orInbuhwMIH6BgsqhkiG9w0BCRACLzGB6jCB5zCB5DCBvQQgqqVw
+# 9wBbf/k7/9NxWOfj0eEILScmByNE1X7fVsE+g6UwgZgwgYCkfjB8MQswCQYDVQQG
 # EwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwG
 # A1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQg
-# VGltZS1TdGFtcCBQQ0EgMjAxMAITMwAAARV0LP0wXi3G+gAAAAABFTAiBCBhvZjR
-# DzJe3JyXh4lxFuJac/aZxKNcUUUu8f3eaRSuGTANBgkqhkiG9w0BAQsFAASCAQBC
-# 3O8i4dwMo7IcQRUuMZQc6ppub1b3yUb4631Y/RXOzCBofQ/32Xqr/qc3C7CH4Bco
-# 4SKfhmcM1qncrDd02E0o0TJeGpPhHyxfN9QYfmQHjSONi0Vj4sKKC/4/8TY7122u
-# XMZ47WfYHwnNXSSZQcVSUTB3BrnD4XVze3jI76qs/elA34pT2cCfSLiHP+X68k5y
-# zJYXs5pQaFy/YQkfrmNKAzVTCNyP03iTIc8mniGb26ds2Nnzn4SHPDC9/PgxbTZF
-# eagYWD5BJhELnxvy3KhAvTPNDJoLeJmzXSK+YpuvwgcjUGwlFswtdjS84JSr0vuL
-# 7ESL/Ewi+u/h8K1WW2bm
+# VGltZS1TdGFtcCBQQ0EgMjAxMAITMwAAAR9OJc2sCvS4HwAAAAABHzAiBCDFyx51
+# /2ZVbsJxG1qlSl0lwz+Aq2JKnztoc8i4VfAKmjANBgkqhkiG9w0BAQsFAASCAQBm
+# j0lE3U28WlWgiyJ+UuoiQxE+RmukoXIbQnCDBk91DJeiJzIRkox6CRbkkXdXw4OE
+# kkFizP2Af4bOhIKlEnigqB2QuUenF4IL8g/CFh0FxeCsL2Al8dBpP45Jg6bmv+Eb
+# RVfaRHvnM1G9e4FfwCy0r3Jpn8dIo0NabqvXgZRRASCNhFPv1DONkcpcCJxcWwkS
+# kmmb0GDggxjRnvMm1HXfyei8IY4Rz6TAX7NKk7pdw7LhxArVKBbgOSx+WANWV6lQ
+# bP5IPpoGLFGHd5HyiUPl8eODeMI1eMlHVe9JP16pJ4FXh1rnRnB/sQfj5IVB34Mz
+# 2kuE0j2dAh6+Q3IZRrRE
 # SIG # End signature block
