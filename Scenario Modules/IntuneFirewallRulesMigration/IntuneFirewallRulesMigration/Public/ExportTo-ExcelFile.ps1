@@ -105,7 +105,7 @@ function Export-ExcelFile
         
     }
     
-    $properties = @('displayName', 'description', 'action','trafficDirection','profileTypes','interfaceTypes','localPortRanges','remortPortRanges', 'protocol','actualLocalAddressRanges','actualRemoteAddressRanges', 'errorMessage')
+    $properties = @('displayName', 'description', 'action','trafficDirection','profileTypes','interfaceTypes','localPortRanges','remotePortRanges', 'protocol','actualLocalAddressRanges','actualRemoteAddressRanges', 'errorMessage')
     if($failedToConvert){    
         $excel = $failedToConvert| Select-Object -Property displayName, description, action, trafficDirection, errorMessage | Export-Excel $path -AutoFilter -AutoSize -WorksheetName "Failed FirewallRule Conversion"
     }
