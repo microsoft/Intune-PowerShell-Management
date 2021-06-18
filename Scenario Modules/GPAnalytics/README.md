@@ -27,7 +27,7 @@ Note: The IntunePolicyAnalytics Module will prompt and install the RSAT tool.
 * Import the IntunePolicyAnalytics Module
 ``` Powershell
     CD  C:\temp\Github\Intune-PowerShell-Management-GPAnalytics\Scenario Modules\GPAnalytics
-    Import-Module .\IntunePolicyAnalyticsClient.psm1
+    Import-Module .\IntunePolicyAnalyticsClient.psd1
 
     PS C:\GitHub\Intune-PowerShell-Management\Scenario Modules\GPAnalytics> Get-Module
 
@@ -35,17 +35,62 @@ Note: The IntunePolicyAnalytics Module will prompt and install the RSAT tool.
     ---------- -------    ----                                ----------------
     Manifest   1.0.0.0    ActiveDirectory                     {Add-ADCentralAccessPolicyMember, Add-ADComputerServiceAccount, Add-ADDomainCo...
     Manifest   1.0.0.0    GroupPolicy                         {Backup-GPO, Copy-GPO, Get-GPInheritance, Get-GPO...}
-    Script     0.0        IntunePolicyAnalyticsClient         {Add-GPToIntuneAdmxMigratedProfile, Add-GPToIntuneMigratedProfile, Get-GPOMigr...
+    Script     6.2107.14  IntunePolicyAnalyticsClient         {Get-GPOMigrationReportCollection, Get-MigrationReadinessReport, Import-GPOCol...
     Manifest   3.1.0.0    Microsoft.PowerShell.Management     {Add-Computer, Add-Content, Checkpoint-Computer, Clear-Content...}
     Manifest   3.1.0.0    Microsoft.PowerShell.Utility        {Add-Member, Add-Type, Clear-Variable, Compare-Object...}
     Script     2.0.0      PSReadline                          {Get-PSReadLineKeyHandler, Get-PSReadLineOption, Remove-PSReadLineKeyHandler, ...
+```
+
+# Import Group Policy Object (GPO) Reports to Intune
+``` Powershell
+NAME
+    Import-GPOBackupReports.ps1
+    
+SYNOPSIS
+    Import-GPOBackupReports - Imports all GPO Report Xml backed up on disk into Intune and generate Migration report
+    
+    
+SYNTAX
+    .\Import-GPOBackupReports.ps1 [-TenantAdminUPN] <String> 
+    [-GpoBackupFolderPath] <String> [[-Environment] <String>] [<CommonParameters>]
+    
+    
+DESCRIPTION
+    Imports all GPO Report Xml backed up on disk into Intune and generate Migration report
+    
+
+PARAMETERS
+    -TenantAdminUPN <String>
+        
+    -GpoBackupFolderPath <String>
+        
+    -Environment <String>
+        Environment is relevant only for test environments
+        
+    <CommonParameters>
+        This cmdlet supports the common parameters: Verbose, Debug,
+        ErrorAction, ErrorVariable, WarningAction, WarningVariable,
+        OutBuffer, PipelineVariable, and OutVariable. For more information, see 
+        about_CommonParameters (https:/go.microsoft.com/fwlink/?LinkID=113216). 
+    
+    -------------------------- EXAMPLE 1 --------------------------
+    
+    PS C:\GitHub\Intune-PowerShell-Management\Scenario Modules\GPAnalytics>.\Import-GPOBackupReports.ps1 -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com" -GPOBackupFolderPath "C:\GPOBackup"
+    
+REMARKS
+    To see the examples, type: "get-help 
+    .\Import-GPOBackupReports.ps1 -examples".
+    For more information, type: "get-help 
+    .\Import-GPOBackupReports.ps1 -detailed".
+    For technical information, type: "get-help 
+    .\Import-GPOBackupReports.ps1 -full".
 ```
 
 # Update the Migration Readiness of previously imported Group Policy Objects
 
 ``` Powershell
 NAME
-    Update-MigrationReadinessReport
+    Update-MigrationReadinessReport.ps1
 
 SYNOPSIS
     Update-MigrationReadinessReport Updates the Migration Readiness Report for previously uploaded GPOs.
@@ -81,56 +126,10 @@ OUTPUTS
 
     -------------------------- EXAMPLE 1 --------------------------
 
-    PS C:\>Update-MigrationReadinessReport -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
+    PS C:\GitHub\Intune-PowerShell-Management\Scenario Modules\GPAnalytics>.\Update-MigrationReadinessReport.ps1 -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
 
     Updates the Migration Readiness Report for previously uploaded GPOs.
 
 
-
-
-
 RELATED LINKS
-```
-# Migrate imported Group Policy Object into Intune Administrative Templates
-``` Powershell
-NAME
-    Add-GPToIntuneAdmxMigratedProfile
-
-SYNOPSIS
-    Migrates the GPO Migration Reports to Intune Admx Profiles
-
-
-SYNTAX
-    Add-GPToIntuneAdmxMigratedProfile [-TenantAdminUPN] <String> [<CommonParameters>]
-
-
-DESCRIPTION
-    Migrates the GPO Migration Reports to Intune Admx Profiles
-
-
-PARAMETERS
-    -TenantAdminUPN <String>
-        The UPN of the Intune Tenant Admin.
-
-        Required?                    true
-        Position?                    1
-        Default value
-        Accept pipeline input?       false
-        Accept wildcard characters?  false
-
-    <CommonParameters>
-        This cmdlet supports the common parameters: Verbose, Debug,
-        ErrorAction, ErrorVariable, WarningAction, WarningVariable,
-        OutBuffer, PipelineVariable, and OutVariable. For more information, see
-        about_CommonParameters (https:/go.microsoft.com/fwlink/?LinkID=113216).
-
-INPUTS
-
-OUTPUTS
-
-    -------------------------- EXAMPLE 1 --------------------------
-
-    PS C:\>Add-GPToIntuneAdmxMigratedProfile -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
-
-    Creates Administrative Templates Configuration Profiles to migrate the GPOs
 ```

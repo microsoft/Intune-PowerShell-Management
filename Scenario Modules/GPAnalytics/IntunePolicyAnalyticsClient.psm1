@@ -27,13 +27,14 @@ Function Get-GPOMigrationReportCollection
     param(
         [Parameter(Mandatory=$true)]
         [string]$TenantAdminUPN,
-        [Switch]$ExpandSettings = $false
+        [Switch]$ExpandSettings = $false,
+        [String]$Environment = "pe"
     )
 
     Try
     {
         # Initialize Module
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN -Environment $Environment
 
         # Fetch the migration report
         $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -139,13 +140,14 @@ Function Get-MigrationReadinessReport
     [cmdletbinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$TenantAdminUPN
+        [string]$TenantAdminUPN,
+        [String]$Environment = "pe"
     )
 
     Try
     {
         # Initialize Module
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN -Environment $Environment
 
         # Fetch the migration report
         $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -277,13 +279,14 @@ Function Update-MigrationReadinessReport
     [cmdletbinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$TenantAdminUPN
+        [string]$TenantAdminUPN,
+        [String]$Environment = "pe"
     )
 
     Try
     {
         # Initialize Module
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN -Environment $Environment
 
         # Fetch the migration report
         $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -347,14 +350,16 @@ Function Import-GPOCollection
 <#
 .Synopsis
     Import-GPOCollection Gets all the Group Policy Object collection for a given domain, uploads it to Intune and determines what settings are supported.
+    Additionally - this cmdlet can also be used to upload GPOs from a folder-path where GPOReport.xml have been previously exported to.
 .DESCRIPTION
     IntunePolicyAnalyticsClient uses the Group Policy cmdlets to get all the Group Policy Objects
     for a given domain, uploads it to Intune and determines what settings are supported.
+.PARAMETER TenantAdminUPN
+    AAD User Principal Name of the Intune Tenant Administrator which is required to upload the GPOs.
 .PARAMETER Domain
     The local AD Domain for which the GPO collection is fetched.
     Defaults to the local AD Domain for the client on which this script is run on.
-.PARAMETER TenantAdminUPN
-    AAD User Principal Name of the Intune Tenant Administrator which is required to upload the GPOs.
+    This is an optional parameter. 
 .PARAMETER OUFilter
     Use OUFilter to constrain the GP Objects to the OU in consideration.
     Specifies a query string that retrieves Active Directory objects. This string uses the PowerShell Expression Language syntax. The PowerShell Expression Language syntax provides rich type-conversion support for value types received by the OUFilter parameter. The syntax uses an in-order representation, which means that the operator is placed between the operand and the value. For more information about the OUFilter parameter, type Get-Help about_ActiveDirectory_Filter.
@@ -369,6 +374,9 @@ Function Import-GPOCollection
         <attr> ::= <PropertyName> | <LDAPDisplayName of the attribute>
         <value>::= <compare this value with an <attr> by using the specified <FilterOperator>>
         For a list of supported types for <value>, type Get-Help about_ActiveDirectory_ObjectModel.
+    This is an optional parameter.
+.PARAMETER GpoBackupFolderPath
+    The folder on local disk where GPOReport.xml files have been previously exported to from a domain
 .OUTPUT
     GPO Collection collected from the local AD domain and sent to Intune
 .EXAMPLE
@@ -377,15 +385,18 @@ Function Import-GPOCollection
 .EXAMPLE
     Import-GPOCollection -Domain "redmond.corp.microsoft.com" -OUFilter 'DistinguishedName -like "OU=CoreIdentity,OU=ITServices,DC=redmond,DC=corp,DC=microsoft,DC=com"' -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com"
         Gets all the GPOs in a specific OU for the given domain, back them up on disk and upload to Intune.
+.EXAMPLE 
+    Import-GPOCollection -TenantAdminUPN "admin@IPASHAMSUA01MSIT.onmicrosoft.com" -GPOBackupFolderPath "C:\GPOBackup"
 #>
     [cmdletbinding()]
-    param(
-        [Alias("Domain")]
-        [Parameter(Mandatory=$true)]
-        [String]$ADDomain,
+    param(        
         [Parameter(Mandatory=$true)]
         [string]$TenantAdminUPN,
-        [String]$OUFilter = 'Name -like "*"'
+        [Alias("Domain")]
+        [String]$ADDomain = $null,
+        [String]$OUFilter = $null,
+        [String]$GpoBackupFolderPath = $null,
+        [String]$Environment = "pe"
     )
 
     Try
@@ -394,14 +405,27 @@ Function Import-GPOCollection
         $sw = [Diagnostics.Stopwatch]::StartNew()
 
         # Initialize Module
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN -Environment $Environment
 
         # Fetch GPO Xml Reports from local AD Domain
         $gpoReportXmlCollection = @{}
         Try
         {
-            Write-Log -Message "Import-GPOCollection: Get GPO backups from ADDomain=$($ADDomain) with OUFilter=$($OUFilter)..."
-            $gpoReportXmlCollection = Get-GPOReportXmlCollectionFromAD -ADDomain $($ADDomain) -OUFilter $($OUFilter)
+            If ($null -ne $GpoBackupFolderPath)
+            {
+                Write-Log -Message "Import-GPOCollection: Read GPO backups from GpoBackupFolderPath $($GpoBackupFolderPath)..."
+                $gpoReportXmlCollection = GPOReportXmlCollectionFromDisk -GpoBackupFolderPath $GpoBackupFolderPath
+            }
+            ElseIf ($null -ne $OUFilter)
+            {                        
+                Write-Log -Message "Import-GPOCollection: Get GPO backups from ADDomain=$($ADDomain) with OUFilter=$($OUFilter)..."
+                $gpoReportXmlCollection = Get-GPOReportXmlCollectionFromAD -ADDomain $($ADDomain) -OUFilter $($OUFilter)
+            }
+            Else
+            {
+                Write-Log -Message "Import-GPOCollection:: Please specify either -ADDomain or -GpoBackupFolderPath" -Level "Error"
+                throw
+            }
         }
         Catch
         {
@@ -588,13 +612,14 @@ Function Remove-GPOMigrationReportCollection
     [cmdletbinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$TenantAdminUPN
+        [string]$TenantAdminUPN,
+        [String]$Environment = "pe"
     )
 
     Try
     {
         # Initialize Module
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN -Environment $Environment
 
         # Fetch the migration report
         $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -671,13 +696,14 @@ Function Add-GPToIntuneAdmxMigratedProfile
     [cmdletbinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$TenantAdminUPN
+        [string]$TenantAdminUPN,
+        [String]$Environment = "pe"
     )
 
     Try
     {
         # Initialize Module
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN $TenantAdminUPN -Environment $Environment
 
         # Fetch the migration report
         $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -925,7 +951,8 @@ Function Add-GPToIntuneMigratedProfile
     [cmdletbinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$TenantAdminUPN
+        [string]$TenantAdminUPN,
+        [String]$Environment = "pe"
     )
 
     Try
@@ -934,7 +961,7 @@ Function Add-GPToIntuneMigratedProfile
         $sw = [Diagnostics.Stopwatch]::StartNew()
 
         # Initialize Module 
-        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN  $TenantAdminUPN
+        $IPAClientConfiguration = Initialize-IPAClientConfiguration -TenantAdminUPN  $TenantAdminUPN -Environment $Environment
 
         # Get Migration reports (Add filters here -SettingCategory, GPO ... )
         $GPOMigrationReportCollection = Get-GPOMigrationReportCollection -TenantAdminUPN $TenantAdminUPN -ExpandSettings
@@ -1088,14 +1115,10 @@ function Write-Log
 }
 #endregion
 
-Export-ModuleMember -Function Add-GPToIntuneAdmxMigratedProfile
-Export-ModuleMember -Function Add-ChromeToEdgeMigratedProfile
-Export-ModuleMember -Function Add-GPToIntuneMigratedProfile
 Export-ModuleMember -Function Get-GPOMigrationReportCollection
 Export-ModuleMember -Function Get-MigrationReadinessReport
 Export-ModuleMember -Function Update-MigrationReadinessReport
 Export-ModuleMember -Function Import-GPOCollection
-Export-ModuleMember -Function Initialize-IPAClientConfiguration
 Export-ModuleMember -Function Remove-GPOMigrationReportCollection
 Export-ModuleMember -Function Write-Log
 #endregion Cmdlets
@@ -1555,6 +1578,66 @@ Function Remove-IntuneEntityCollection
 #region AD Utilities
 <#
 .Synopsis
+    Get-GPOReportXmlCollectionFromDisk: Reads previously backed up GPO Report Xml files from disk.
+.DESCRIPTION
+    Reads previously backed up GPO Report Xml files from disk.
+.PARAMETER GpoBackupFolderPath
+    Path to the Folder on local disk where the GPOReport.xml files are backed up.
+#>
+Function Get-GPOReportXmlCollectionFromDisk
+{
+    param(
+        [String]$GpoBackupFolderPath        
+    )
+
+    $gpoReportXmlCollection = @{}
+    $gpoMigrationReportCollection = @{}
+
+    If ($script:IPAClientConfiguration.DeltaUpdate -eq $true)
+    {
+        # If set, check Intune before posting GPOReportXml
+        $gpoMigrationReportCollection = Get-GPOMigrationReportCollection -TenantAdminUPN $script:IPAClientConfiguration.TenantAdminUPN
+    }
+
+    # Get list of backuped GPO Reports
+    $groupPolicyObjectXmlFileList = Get-ChildItem $GpoBackupFolderPath -Filter *.xml
+    ForEach ($groupPolicyObjectXmlFile in $groupPolicyObjectXmlFileList)
+    {
+        Try
+        {
+            [Xml]$gpoReportXml = Get-Content $groupPolicyObjectXmlFile.FullName
+            $gpoGuid = $gpoReportXml.GPO.Identifier.Identifier.InnerText.TrimStart("{").TrimEnd("}")            
+            $ou = ($gpoReportXml.GPO.Name);
+            
+            # Backup a GPO as Xml in memory if not previously uploaded
+            $gpoReportXmlKey = "$($gpoGuid)_$($ou)"
+
+            If (!$gpoMigrationReportCollection.Contains($gpoReportXmlKey))
+            {
+                $bytes = [System.Text.Encoding]::UNICODE.GetBytes($gpoReportXml.InnerXml)
+                $encodedText = [Convert]::ToBase64String($bytes)
+                $gpoReportXmlCollection.Add($gpoReportXmlKey, [PSCustomObject]@{ouDistinguishedName = $ou; content = $encodedText})
+                Write-Log -Message "Get-GPOReportXmlCollectionFromDisk:  Backed up GPO Guid=$($gpoGuid), $($ou)"
+            }
+            Else
+            {
+                Write-Log -Message "Get-GPOReportXmlCollectionFromDisk:  GPO Guid=$($gpoGuid), $($ou.Name) previously uploaded"
+            }
+        }
+        Catch
+        {
+            # Log error
+            $exception  = $_
+            Write-Log -Message "Get-GPOReportXmlCollectionFromAD: Failure: ($exception)" -Level "Warn"
+            # We continue to next GPO
+        }
+    }
+
+    return $gpoReportXmlCollection;
+}
+
+<#
+.Synopsis
  Get-GPOReportXmlCollectionFromAD: Calls Get-GPOReport for all GPO discovered for the given domain.
 .DESCRIPTION
    Calls Get-GPOReport for all GPO discovered for the given domain and returns the Xml report collection.
@@ -1653,194 +1736,194 @@ Function Get-GPOReportXmlCollectionFromAD
 }
 #endregion AD Utilities
 # SIG # Begin signature block
-# MIIjewYJKoZIhvcNAQcCoIIjbDCCI2gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIjkgYJKoZIhvcNAQcCoIIjgzCCI38CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNshEYvRaQ80Hp
-# ekJnIXUyAuFko31nWqr39cfZMaigyaCCDXYwggX0MIID3KADAgECAhMzAAABhk0h
-# daDZB74sAAAAAAGGMA0GCSqGSIb3DQEBCwUAMH4xCzAJBgNVBAYTAlVTMRMwEQYD
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByxJgR4afTjj3H
+# RoNUltkpZgk9qgUtvcfZy/hjpDPVk6CCDYEwggX/MIID56ADAgECAhMzAAAB32vw
+# LpKnSrTQAAAAAAHfMA0GCSqGSIb3DQEBCwUAMH4xCzAJBgNVBAYTAlVTMRMwEQYD
 # VQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNy
 # b3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNpZ25p
-# bmcgUENBIDIwMTEwHhcNMjAwMzA0MTgzOTQ2WhcNMjEwMzAzMTgzOTQ2WjB0MQsw
+# bmcgUENBIDIwMTEwHhcNMjAxMjE1MjEzMTQ1WhcNMjExMjAyMjEzMTQ1WjB0MQsw
 # CQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9u
 # ZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMR4wHAYDVQQDExVNaWNy
 # b3NvZnQgQ29ycG9yYXRpb24wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIB
-# AQC49eyyaaieg3Xb7ew+/hA34gqzRuReb9svBF6N3+iLD5A0iMddtunnmbFVQ+lN
-# Wphf/xOGef5vXMMMk744txo/kT6CKq0GzV+IhAqDytjH3UgGhLBNZ/UWuQPgrnhw
-# afQ3ZclsXo1lto4pyps4+X3RyQfnxCwqtjRxjCQ+AwIzk0vSVFnId6AwbB73w2lJ
-# +MC+E6nVmyvikp7DT2swTF05JkfMUtzDosktz/pvvMWY1IUOZ71XqWUXcwfzWDJ+
-# 96WxBH6LpDQ1fCQ3POA3jCBu3mMiB1kSsMihH+eq1EzD0Es7iIT1MlKERPQmC+xl
-# K+9pPAw6j+rP2guYfKrMFr39AgMBAAGjggFzMIIBbzAfBgNVHSUEGDAWBgorBgEE
-# AYI3TAgBBggrBgEFBQcDAzAdBgNVHQ4EFgQUhTFTFHuCaUCdTgZXja/OAQ9xOm4w
-# RQYDVR0RBD4wPKQ6MDgxHjAcBgNVBAsTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEW
-# MBQGA1UEBRMNMjMwMDEyKzQ1ODM4NDAfBgNVHSMEGDAWgBRIbmTlUAXTgqoXNzci
-# tW2oynUClTBUBgNVHR8ETTBLMEmgR6BFhkNodHRwOi8vd3d3Lm1pY3Jvc29mdC5j
-# b20vcGtpb3BzL2NybC9NaWNDb2RTaWdQQ0EyMDExXzIwMTEtMDctMDguY3JsMGEG
-# CCsGAQUFBwEBBFUwUzBRBggrBgEFBQcwAoZFaHR0cDovL3d3dy5taWNyb3NvZnQu
-# Y29tL3BraW9wcy9jZXJ0cy9NaWNDb2RTaWdQQ0EyMDExXzIwMTEtMDctMDguY3J0
-# MAwGA1UdEwEB/wQCMAAwDQYJKoZIhvcNAQELBQADggIBAEDkLXWKDtJ8rLh3d7XP
-# 1xU1s6Gt0jDqeHoIpTvnsREt9MsKriVGKdVVGSJow1Lz9+9bINmPZo7ZdMhNhWGQ
-# QnEF7z/3czh0MLO0z48cxCrjLch0P2sxvtcaT57LBmEy+tbhlUB6iz72KWavxuhP
-# 5zxKEChtLp8gHkp5/1YTPlvRYFrZr/iup2jzc/Oo5N4/q+yhOsRT3KJu62ekQUUP
-# sPU2bWsaF/hUPW/L2O1Fecf+6OOJLT2bHaAzr+EBAn0KAUiwdM+AUvasG9kHLX+I
-# XXlEZvfsXGzzxFlWzNbpM99umWWMQPTGZPpSCTDDs/1Ci0Br2/oXcgayYLaZCWsj
-# 1m/a0V8OHZGbppP1RrBeLQKfATjtAl0xrhMr4kgfvJ6ntChg9dxy4DiGWnsj//Qy
-# wUs1UxVchRR7eFaP3M8/BV0eeMotXwTNIwzSd3uAzAI+NSrN5pVlQeC0XXTueeDu
-# xDch3S5UUdDOvdlOdlRAa+85Si6HmEUgx3j0YYSC1RWBdEhwsAdH6nXtXEshAAxf
-# 8PWh2wCsczMe/F4vTg4cmDsBTZwwrHqL5krX++s61sLWA67Yn4Db6rXV9Imcf5UM
-# Cq09wJj5H93KH9qc1yCiJzDCtbtgyHYXAkSHQNpoj7tDX6ko9gE8vXqZIGj82mwD
-# TAY9ofRH0RSMLJqpgLrBPCKNMIIHejCCBWKgAwIBAgIKYQ6Q0gAAAAAAAzANBgkq
-# hkiG9w0BAQsFADCBiDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24x
-# EDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlv
-# bjEyMDAGA1UEAxMpTWljcm9zb2Z0IFJvb3QgQ2VydGlmaWNhdGUgQXV0aG9yaXR5
-# IDIwMTEwHhcNMTEwNzA4MjA1OTA5WhcNMjYwNzA4MjEwOTA5WjB+MQswCQYDVQQG
-# EwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwG
-# A1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSgwJgYDVQQDEx9NaWNyb3NvZnQg
-# Q29kZSBTaWduaW5nIFBDQSAyMDExMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIIC
-# CgKCAgEAq/D6chAcLq3YbqqCEE00uvK2WCGfQhsqa+laUKq4BjgaBEm6f8MMHt03
-# a8YS2AvwOMKZBrDIOdUBFDFC04kNeWSHfpRgJGyvnkmc6Whe0t+bU7IKLMOv2akr
-# rnoJr9eWWcpgGgXpZnboMlImEi/nqwhQz7NEt13YxC4Ddato88tt8zpcoRb0Rrrg
-# OGSsbmQ1eKagYw8t00CT+OPeBw3VXHmlSSnnDb6gE3e+lD3v++MrWhAfTVYoonpy
-# 4BI6t0le2O3tQ5GD2Xuye4Yb2T6xjF3oiU+EGvKhL1nkkDstrjNYxbc+/jLTswM9
-# sbKvkjh+0p2ALPVOVpEhNSXDOW5kf1O6nA+tGSOEy/S6A4aN91/w0FK/jJSHvMAh
-# dCVfGCi2zCcoOCWYOUo2z3yxkq4cI6epZuxhH2rhKEmdX4jiJV3TIUs+UsS1Vz8k
-# A/DRelsv1SPjcF0PUUZ3s/gA4bysAoJf28AVs70b1FVL5zmhD+kjSbwYuER8ReTB
-# w3J64HLnJN+/RpnF78IcV9uDjexNSTCnq47f7Fufr/zdsGbiwZeBe+3W7UvnSSmn
-# Eyimp31ngOaKYnhfsi+E11ecXL93KCjx7W3DKI8sj0A3T8HhhUSJxAlMxdSlQy90
-# lfdu+HggWCwTXWCVmj5PM4TasIgX3p5O9JawvEagbJjS4NaIjAsCAwEAAaOCAe0w
-# ggHpMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBRIbmTlUAXTgqoXNzcitW2o
-# ynUClTAZBgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMAQTALBgNVHQ8EBAMCAYYwDwYD
-# VR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBRyLToCMZBDuRQFTuHqp8cx0SOJNDBa
-# BgNVHR8EUzBRME+gTaBLhklodHRwOi8vY3JsLm1pY3Jvc29mdC5jb20vcGtpL2Ny
-# bC9wcm9kdWN0cy9NaWNSb29DZXJBdXQyMDExXzIwMTFfMDNfMjIuY3JsMF4GCCsG
-# AQUFBwEBBFIwUDBOBggrBgEFBQcwAoZCaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
-# L3BraS9jZXJ0cy9NaWNSb29DZXJBdXQyMDExXzIwMTFfMDNfMjIuY3J0MIGfBgNV
-# HSAEgZcwgZQwgZEGCSsGAQQBgjcuAzCBgzA/BggrBgEFBQcCARYzaHR0cDovL3d3
-# dy5taWNyb3NvZnQuY29tL3BraW9wcy9kb2NzL3ByaW1hcnljcHMuaHRtMEAGCCsG
-# AQUFBwICMDQeMiAdAEwAZQBnAGEAbABfAHAAbwBsAGkAYwB5AF8AcwB0AGEAdABl
-# AG0AZQBuAHQALiAdMA0GCSqGSIb3DQEBCwUAA4ICAQBn8oalmOBUeRou09h0ZyKb
-# C5YR4WOSmUKWfdJ5DJDBZV8uLD74w3LRbYP+vj/oCso7v0epo/Np22O/IjWll11l
-# hJB9i0ZQVdgMknzSGksc8zxCi1LQsP1r4z4HLimb5j0bpdS1HXeUOeLpZMlEPXh6
-# I/MTfaaQdION9MsmAkYqwooQu6SpBQyb7Wj6aC6VoCo/KmtYSWMfCWluWpiW5IP0
-# wI/zRive/DvQvTXvbiWu5a8n7dDd8w6vmSiXmE0OPQvyCInWH8MyGOLwxS3OW560
-# STkKxgrCxq2u5bLZ2xWIUUVYODJxJxp/sfQn+N4sOiBpmLJZiWhub6e3dMNABQam
-# ASooPoI/E01mC8CzTfXhj38cbxV9Rad25UAqZaPDXVJihsMdYzaXht/a8/jyFqGa
-# J+HNpZfQ7l1jQeNbB5yHPgZ3BtEGsXUfFL5hYbXw3MYbBL7fQccOKO7eZS/sl/ah
-# XJbYANahRr1Z85elCUtIEJmAH9AAKcWxm6U/RXceNcbSoqKfenoi+kiVH6v7RyOA
-# 9Z74v2u3S5fi63V4GuzqN5l5GEv/1rMjaHXmr/r8i+sLgOppO6/8MO0ETI7f33Vt
-# Y5E90Z1WTk+/gFcioXgRMiF670EKsT/7qMykXcGhiJtXcVZOSEXAQsmbdlsKgEhr
-# /Xmfwb1tbWrJUnMTDXpQzTGCFVswghVXAgEBMIGVMH4xCzAJBgNVBAYTAlVTMRMw
-# EQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVN
-# aWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBDb2RlIFNp
-# Z25pbmcgUENBIDIwMTECEzMAAAGGTSF1oNkHviwAAAAAAYYwDQYJYIZIAWUDBAIB
-# BQCgga4wGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEO
-# MAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEIIO9eUaLpowZB9bASIqIAzls
-# 4Ep6pjF1mAxUq7RtmiMgMEIGCisGAQQBgjcCAQwxNDAyoBSAEgBNAGkAYwByAG8A
-# cwBvAGYAdKEagBhodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20wDQYJKoZIhvcNAQEB
-# BQAEggEAp2zX7XAJqu3MqI/kbaYt2Gi+fOgEYAo2cyA5nr8JajZF4bfE1SIsdvqe
-# MVnsFPNoWH+EW/+HduzzohsY2S66Xar8aOuc8dFqtlOb8B01GayRw/Tk4kqKEALT
-# 9UTXc2ubmVVWa7ovsaCkkcqAZjd9uCrAmsd8DYxvpI+ZsCBcyJKPy5euYegU9L3u
-# A2fqvmW18baY970PR5S/1WXPlnIqBpw+KfnxokgJtSlpKOQOc5yTTmg1IMNOGoPJ
-# N4TI3z1r8pzTI2vn+Qko4PNi3sn70qkxWmVyp8sJgwxAC4bWUxkHvxsRipadmLBv
-# U+XmSBl34t9k5KmgXXj65RJggFndV6GCEuUwghLhBgorBgEEAYI3AwMBMYIS0TCC
-# Es0GCSqGSIb3DQEHAqCCEr4wghK6AgEDMQ8wDQYJYIZIAWUDBAIBBQAwggFRBgsq
-# hkiG9w0BCRABBKCCAUAEggE8MIIBOAIBAQYKKwYBBAGEWQoDATAxMA0GCWCGSAFl
-# AwQCAQUABCAxqcfOyTx27ypopS+n4o3BBscJb2rV8eVgwkshPud9lwIGX4by+pt9
-# GBMyMDIwMTAyNDAwMTgyOC4wODNaMASAAgH0oIHQpIHNMIHKMQswCQYDVQQGEwJV
-# UzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UE
-# ChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSUwIwYDVQQLExxNaWNyb3NvZnQgQW1l
-# cmljYSBPcGVyYXRpb25zMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjo3QkYxLUUz
-# RUEtQjgwODElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2VydmljZaCC
-# DjwwggTxMIID2aADAgECAhMzAAABH04lzawK9LgfAAAAAAEfMA0GCSqGSIb3DQEB
-# CwUAMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQH
-# EwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xJjAkBgNV
-# BAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwMB4XDTE5MTExMzIxNDA0
-# MVoXDTIxMDIxMTIxNDA0MVowgcoxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNo
+# AQC2uxlZEACjqfHkuFyoCwfL25ofI9DZWKt4wEj3JBQ48GPt1UsDv834CcoUUPMn
+# s/6CtPoaQ4Thy/kbOOg/zJAnrJeiMQqRe2Lsdb/NSI2gXXX9lad1/yPUDOXo4GNw
+# PjXq1JZi+HZV91bUr6ZjzePj1g+bepsqd/HC1XScj0fT3aAxLRykJSzExEBmU9eS
+# yuOwUuq+CriudQtWGMdJU650v/KmzfM46Y6lo/MCnnpvz3zEL7PMdUdwqj/nYhGG
+# 3UVILxX7tAdMbz7LN+6WOIpT1A41rwaoOVnv+8Ua94HwhjZmu1S73yeV7RZZNxoh
+# EegJi9YYssXa7UZUUkCCA+KnAgMBAAGjggF+MIIBejAfBgNVHSUEGDAWBgorBgEE
+# AYI3TAgBBggrBgEFBQcDAzAdBgNVHQ4EFgQUOPbML8IdkNGtCfMmVPtvI6VZ8+Mw
+# UAYDVR0RBEkwR6RFMEMxKTAnBgNVBAsTIE1pY3Jvc29mdCBPcGVyYXRpb25zIFB1
+# ZXJ0byBSaWNvMRYwFAYDVQQFEw0yMzAwMTIrNDYzMDA5MB8GA1UdIwQYMBaAFEhu
+# ZOVQBdOCqhc3NyK1bajKdQKVMFQGA1UdHwRNMEswSaBHoEWGQ2h0dHA6Ly93d3cu
+# bWljcm9zb2Z0LmNvbS9wa2lvcHMvY3JsL01pY0NvZFNpZ1BDQTIwMTFfMjAxMS0w
+# Ny0wOC5jcmwwYQYIKwYBBQUHAQEEVTBTMFEGCCsGAQUFBzAChkVodHRwOi8vd3d3
+# Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY0NvZFNpZ1BDQTIwMTFfMjAx
+# MS0wNy0wOC5jcnQwDAYDVR0TAQH/BAIwADANBgkqhkiG9w0BAQsFAAOCAgEAnnqH
+# tDyYUFaVAkvAK0eqq6nhoL95SZQu3RnpZ7tdQ89QR3++7A+4hrr7V4xxmkB5BObS
+# 0YK+MALE02atjwWgPdpYQ68WdLGroJZHkbZdgERG+7tETFl3aKF4KpoSaGOskZXp
+# TPnCaMo2PXoAMVMGpsQEQswimZq3IQ3nRQfBlJ0PoMMcN/+Pks8ZTL1BoPYsJpok
+# t6cql59q6CypZYIwgyJ892HpttybHKg1ZtQLUlSXccRMlugPgEcNZJagPEgPYni4
+# b11snjRAgf0dyQ0zI9aLXqTxWUU5pCIFiPT0b2wsxzRqCtyGqpkGM8P9GazO8eao
+# mVItCYBcJSByBx/pS0cSYwBBHAZxJODUqxSXoSGDvmTfqUJXntnWkL4okok1FiCD
+# Z4jpyXOQunb6egIXvkgQ7jb2uO26Ow0m8RwleDvhOMrnHsupiOPbozKroSa6paFt
+# VSh89abUSooR8QdZciemmoFhcWkEwFg4spzvYNP4nIs193261WyTaRMZoceGun7G
+# CT2Rl653uUj+F+g94c63AhzSq4khdL4HlFIP2ePv29smfUnHtGq6yYFDLnT0q/Y+
+# Di3jwloF8EWkkHRtSuXlFUbTmwr/lDDgbpZiKhLS7CBTDj32I0L5i532+uHczw82
+# oZDmYmYmIUSMbZOgS65h797rj5JJ6OkeEUJoAVwwggd6MIIFYqADAgECAgphDpDS
+# AAAAAAADMA0GCSqGSIb3DQEBCwUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMK
+# V2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0
+# IENvcnBvcmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUm9vdCBDZXJ0aWZpY2F0
+# ZSBBdXRob3JpdHkgMjAxMTAeFw0xMTA3MDgyMDU5MDlaFw0yNjA3MDgyMTA5MDla
+# MH4xCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
+# ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMT
+# H01pY3Jvc29mdCBDb2RlIFNpZ25pbmcgUENBIDIwMTEwggIiMA0GCSqGSIb3DQEB
+# AQUAA4ICDwAwggIKAoICAQCr8PpyEBwurdhuqoIQTTS68rZYIZ9CGypr6VpQqrgG
+# OBoESbp/wwwe3TdrxhLYC/A4wpkGsMg51QEUMULTiQ15ZId+lGAkbK+eSZzpaF7S
+# 35tTsgosw6/ZqSuuegmv15ZZymAaBelmdugyUiYSL+erCFDPs0S3XdjELgN1q2jz
+# y23zOlyhFvRGuuA4ZKxuZDV4pqBjDy3TQJP4494HDdVceaVJKecNvqATd76UPe/7
+# 4ytaEB9NViiienLgEjq3SV7Y7e1DkYPZe7J7hhvZPrGMXeiJT4Qa8qEvWeSQOy2u
+# M1jFtz7+MtOzAz2xsq+SOH7SnYAs9U5WkSE1JcM5bmR/U7qcD60ZI4TL9LoDho33
+# X/DQUr+MlIe8wCF0JV8YKLbMJyg4JZg5SjbPfLGSrhwjp6lm7GEfauEoSZ1fiOIl
+# XdMhSz5SxLVXPyQD8NF6Wy/VI+NwXQ9RRnez+ADhvKwCgl/bwBWzvRvUVUvnOaEP
+# 6SNJvBi4RHxF5MHDcnrgcuck379GmcXvwhxX24ON7E1JMKerjt/sW5+v/N2wZuLB
+# l4F77dbtS+dJKacTKKanfWeA5opieF+yL4TXV5xcv3coKPHtbcMojyyPQDdPweGF
+# RInECUzF1KVDL3SV9274eCBYLBNdYJWaPk8zhNqwiBfenk70lrC8RqBsmNLg1oiM
+# CwIDAQABo4IB7TCCAekwEAYJKwYBBAGCNxUBBAMCAQAwHQYDVR0OBBYEFEhuZOVQ
+# BdOCqhc3NyK1bajKdQKVMBkGCSsGAQQBgjcUAgQMHgoAUwB1AGIAQwBBMAsGA1Ud
+# DwQEAwIBhjAPBgNVHRMBAf8EBTADAQH/MB8GA1UdIwQYMBaAFHItOgIxkEO5FAVO
+# 4eqnxzHRI4k0MFoGA1UdHwRTMFEwT6BNoEuGSWh0dHA6Ly9jcmwubWljcm9zb2Z0
+# LmNvbS9wa2kvY3JsL3Byb2R1Y3RzL01pY1Jvb0NlckF1dDIwMTFfMjAxMV8wM18y
+# Mi5jcmwwXgYIKwYBBQUHAQEEUjBQME4GCCsGAQUFBzAChkJodHRwOi8vd3d3Lm1p
+# Y3Jvc29mdC5jb20vcGtpL2NlcnRzL01pY1Jvb0NlckF1dDIwMTFfMjAxMV8wM18y
+# Mi5jcnQwgZ8GA1UdIASBlzCBlDCBkQYJKwYBBAGCNy4DMIGDMD8GCCsGAQUFBwIB
+# FjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2RvY3MvcHJpbWFyeWNw
+# cy5odG0wQAYIKwYBBQUHAgIwNB4yIB0ATABlAGcAYQBsAF8AcABvAGwAaQBjAHkA
+# XwBzAHQAYQB0AGUAbQBlAG4AdAAuIB0wDQYJKoZIhvcNAQELBQADggIBAGfyhqWY
+# 4FR5Gi7T2HRnIpsLlhHhY5KZQpZ90nkMkMFlXy4sPvjDctFtg/6+P+gKyju/R6mj
+# 82nbY78iNaWXXWWEkH2LRlBV2AySfNIaSxzzPEKLUtCw/WvjPgcuKZvmPRul1LUd
+# d5Q54ulkyUQ9eHoj8xN9ppB0g430yyYCRirCihC7pKkFDJvtaPpoLpWgKj8qa1hJ
+# Yx8JaW5amJbkg/TAj/NGK978O9C9Ne9uJa7lryft0N3zDq+ZKJeYTQ49C/IIidYf
+# wzIY4vDFLc5bnrRJOQrGCsLGra7lstnbFYhRRVg4MnEnGn+x9Cf43iw6IGmYslmJ
+# aG5vp7d0w0AFBqYBKig+gj8TTWYLwLNN9eGPfxxvFX1Fp3blQCplo8NdUmKGwx1j
+# NpeG39rz+PIWoZon4c2ll9DuXWNB41sHnIc+BncG0QaxdR8UvmFhtfDcxhsEvt9B
+# xw4o7t5lL+yX9qFcltgA1qFGvVnzl6UJS0gQmYAf0AApxbGbpT9Fdx41xtKiop96
+# eiL6SJUfq/tHI4D1nvi/a7dLl+LrdXga7Oo3mXkYS//WsyNodeav+vyL6wuA6mk7
+# r/ww7QRMjt/fdW1jkT3RnVZOT7+AVyKheBEyIXrvQQqxP/uozKRdwaGIm1dxVk5I
+# RcBCyZt2WwqASGv9eZ/BvW1taslScxMNelDNMYIVZzCCFWMCAQEwgZUwfjELMAkG
+# A1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQx
+# HjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEoMCYGA1UEAxMfTWljcm9z
+# b2Z0IENvZGUgU2lnbmluZyBQQ0EgMjAxMQITMwAAAd9r8C6Sp0q00AAAAAAB3zAN
+# BglghkgBZQMEAgEFAKCBrjAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8BPF6AqA
+# d1t3hIsH6hHLDnqiJ0XSO8yNlpUp6j2l22IwQgYKKwYBBAGCNwIBDDE0MDKgFIAS
+# AE0AaQBjAHIAbwBzAG8AZgB0oRqAGGh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbTAN
+# BgkqhkiG9w0BAQEFAASCAQCk0ykaSz6IQ2uPYNo46HrSFK4yg8Wg053QXDo0aQiw
+# evNcVJLuq8IsY3B2DkD4Fp9zY88lMPeMJlx7hlXiAl95nMjSRkVMN/4DJwW7DJ8T
+# eIGctyCDeXDgB1Rk0/MZ+Tx2JYRMwqz3jgrSHuPC9ays+YU6JrknkE94/oPXOTD+
+# BugJSsVQz2k/XIq/gqhQbbRN7a4DtFH6DtbtkABzi2rSVE5eCOiAwgwuY1AElVH8
+# XBtP9fYBNcoYtlm+2w1OqM8owUa1bwe2tE6yYsy1HBMxexGDucJpdFuKJhUe61a9
+# +akMc9tDwFz9688K4SvgihIUxw3l5Jr8pN+qxaVhvnDdoYIS8TCCEu0GCisGAQQB
+# gjcDAwExghLdMIIS2QYJKoZIhvcNAQcCoIISyjCCEsYCAQMxDzANBglghkgBZQME
+# AgEFADCCAVUGCyqGSIb3DQEJEAEEoIIBRASCAUAwggE8AgEBBgorBgEEAYRZCgMB
+# MDEwDQYJYIZIAWUDBAIBBQAEINdMRO8i3t3XLRtmfd2x7Oz8dGqqb6jPqj38cZ4x
+# 17sOAgZgr7WGZgwYEzIwMjEwNjE4MDY1NTMxLjk3NVowBIACAfSggdSkgdEwgc4x
+# CzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRt
+# b25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1p
+# Y3Jvc29mdCBPcGVyYXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMg
+# VFNTIEVTTjpDNEJELUUzN0YtNUZGQzElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUt
+# U3RhbXAgU2VydmljZaCCDkQwggT1MIID3aADAgECAhMzAAABV0QHYtxv6L4qAAAA
+# AAFXMA0GCSqGSIb3DQEBCwUAMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNo
 # aW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29y
-# cG9yYXRpb24xJTAjBgNVBAsTHE1pY3Jvc29mdCBBbWVyaWNhIE9wZXJhdGlvbnMx
-# JjAkBgNVBAsTHVRoYWxlcyBUU1MgRVNOOjdCRjEtRTNFQS1CODA4MSUwIwYDVQQD
-# ExxNaWNyb3NvZnQgVGltZS1TdGFtcCBTZXJ2aWNlMIIBIjANBgkqhkiG9w0BAQEF
-# AAOCAQ8AMIIBCgKCAQEApUwPzFb3PxyMf046MLWFCtFwlCpzu1wPi26cp0QYxa19
-# ybbPnDF+1xljQ1p6pXj+hPLTQIgsV/xLAnDoKnRGmq37L4eSVSXgMmCTDaZLZUwJ
-# i3DysQgdCX8uwo+cnlfGfFCZ0OzTIVgjt4wa1oWtqkg0eJ+/h4CeiGfdSfrz9Ds9
-# o/zn8VWpfzscW7vHFjAmT3XkATl3Z1UIVxibSDhOGS+fNEb8twd24Rn+qBpitRqV
-# LbJGfLakIMj9cORXXhvYWGyCQfyuPmWPKaQ194iZiqWL/s/9CWW5+381++7ORa9a
-# qtOmDyRCTVDvGtLTIZnsA/WID7SQVxXgq8u5YtsIswIDAQABo4IBGzCCARcwHQYD
-# VR0OBBYEFBWjHwA6MBNjBDdlIlsrwTaJ+uDAMB8GA1UdIwQYMBaAFNVjOlyKMZDz
-# Q3t8RhvFM2hahW1VMFYGA1UdHwRPME0wS6BJoEeGRWh0dHA6Ly9jcmwubWljcm9z
-# b2Z0LmNvbS9wa2kvY3JsL3Byb2R1Y3RzL01pY1RpbVN0YVBDQV8yMDEwLTA3LTAx
-# LmNybDBaBggrBgEFBQcBAQROMEwwSgYIKwYBBQUHMAKGPmh0dHA6Ly93d3cubWlj
-# cm9zb2Z0LmNvbS9wa2kvY2VydHMvTWljVGltU3RhUENBXzIwMTAtMDctMDEuY3J0
-# MAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwgwDQYJKoZIhvcNAQEL
-# BQADggEBAJjRR8DcZOLKYqvJzonPUcQsC9l/Pwu94Mv+7l8X1BW2+zKEqADT9ogJ
-# D3Op7cAg3x3x6baEL6qw4hwOCU3dWUEmxAS6hO6Wd8Fdi/oUZlM4qesCiX91DZ5P
-# 9xXiEDz1UXQxbZkY/KgegJAI4COyQItpLylGgmmx58X1y5gYUUmlzEHYwCe3UYLC
-# m6AE2qN+/TQ51hylim7BNR6s2wqIEJgFLGy11ZgSJOi5tQ5BqLOh+wItYRqroZR0
-# QINNTZ0+KV0qymbanYqIMifGbc5M9fNc+f2RNnG4MZvMAfsIUVlq/3MhrWN/kDKg
-# vt7vx0LI/Ofg1lcFPFPjwfuKzYtqbEQwggZxMIIEWaADAgECAgphCYEqAAAAAAAC
-# MA0GCSqGSIb3DQEBCwUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGlu
-# Z3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
-# cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUm9vdCBDZXJ0aWZpY2F0ZSBBdXRo
-# b3JpdHkgMjAxMDAeFw0xMDA3MDEyMTM2NTVaFw0yNTA3MDEyMTQ2NTVaMHwxCzAJ
-# BgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25k
-# MR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xJjAkBgNVBAMTHU1pY3Jv
-# c29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
-# MIIBCgKCAQEAqR0NvHcRijog7PwTl/X6f2mUa3RUENWlCgCChfvtfGhLLF/Fw+Vh
-# wna3PmYrW/AVUycEMR9BGxqVHc4JE458YTBZsTBED/FgiIRUQwzXTbg4CLNC3ZOs
-# 1nMwVyaCo0UN0Or1R4HNvyRgMlhgRvJYR4YyhB50YWeRX4FUsc+TTJLBxKZd0WET
-# bijGGvmGgLvfYfxGwScdJGcSchohiq9LZIlQYrFd/XcfPfBXday9ikJNQFHRD5wG
-# Pmd/9WbAA5ZEfu/QS/1u5ZrKsajyeioKMfDaTgaRtogINeh4HLDpmc085y9Euqf0
-# 3GS9pAHBIAmTeM38vMDJRF1eFpwBBU8iTQIDAQABo4IB5jCCAeIwEAYJKwYBBAGC
-# NxUBBAMCAQAwHQYDVR0OBBYEFNVjOlyKMZDzQ3t8RhvFM2hahW1VMBkGCSsGAQQB
-# gjcUAgQMHgoAUwB1AGIAQwBBMAsGA1UdDwQEAwIBhjAPBgNVHRMBAf8EBTADAQH/
-# MB8GA1UdIwQYMBaAFNX2VsuP6KJcYmjRPZSQW9fOmhjEMFYGA1UdHwRPME0wS6BJ
-# oEeGRWh0dHA6Ly9jcmwubWljcm9zb2Z0LmNvbS9wa2kvY3JsL3Byb2R1Y3RzL01p
-# Y1Jvb0NlckF1dF8yMDEwLTA2LTIzLmNybDBaBggrBgEFBQcBAQROMEwwSgYIKwYB
-# BQUHMAKGPmh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2kvY2VydHMvTWljUm9v
-# Q2VyQXV0XzIwMTAtMDYtMjMuY3J0MIGgBgNVHSABAf8EgZUwgZIwgY8GCSsGAQQB
-# gjcuAzCBgTA9BggrBgEFBQcCARYxaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL1BL
-# SS9kb2NzL0NQUy9kZWZhdWx0Lmh0bTBABggrBgEFBQcCAjA0HjIgHQBMAGUAZwBh
-# AGwAXwBQAG8AbABpAGMAeQBfAFMAdABhAHQAZQBtAGUAbgB0AC4gHTANBgkqhkiG
-# 9w0BAQsFAAOCAgEAB+aIUQ3ixuCYP4FxAz2do6Ehb7Prpsz1Mb7PBeKp/vpXbRkw
-# s8LFZslq3/Xn8Hi9x6ieJeP5vO1rVFcIK1GCRBL7uVOMzPRgEop2zEBAQZvcXBf/
-# XPleFzWYJFZLdO9CEMivv3/Gf/I3fVo/HPKZeUqRUgCvOA8X9S95gWXZqbVr5MfO
-# 9sp6AG9LMEQkIjzP7QOllo9ZKby2/QThcJ8ySif9Va8v/rbljjO7Yl+a21dA6fHO
-# mWaQjP9qYn/dxUoLkSbiOewZSnFjnXshbcOco6I8+n99lmqQeKZt0uGc+R38ONiU
-# 9MalCpaGpL2eGq4EQoO4tYCbIjggtSXlZOz39L9+Y1klD3ouOVd2onGqBooPiRa6
-# YacRy5rYDkeagMXQzafQ732D8OE7cQnfXXSYIghh2rBQHm+98eEA3+cxB6STOvdl
-# R3jo+KhIq/fecn5ha293qYHLpwmsObvsxsvYgrRyzR30uIUBHoD7G4kqVDmyW9rI
-# DVWZeodzOwjmmC3qjeAzLhIp9cAvVCch98isTtoouLGp25ayp0Kiyc8ZQU3ghvkq
-# mqMRZjDTu3QyS99je/WZii8bxyGvWbWu3EQ8l1Bx16HSxVXjad5XwdHeMMD9zOZN
-# +w2/XU/pnR4ZOC+8z1gFLu8NoFA12u8JJxzVs341Hgi62jbb01+P3nSISRKhggLO
-# MIICNwIBATCB+KGB0KSBzTCByjELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hp
-# bmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jw
-# b3JhdGlvbjElMCMGA1UECxMcTWljcm9zb2Z0IEFtZXJpY2EgT3BlcmF0aW9uczEm
-# MCQGA1UECxMdVGhhbGVzIFRTUyBFU046N0JGMS1FM0VBLUI4MDgxJTAjBgNVBAMT
-# HE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZpY2WiIwoBATAHBgUrDgMCGgMVANQv
-# RJa2WvwYqkrR2BYDDosSXkkMoIGDMIGApH4wfDELMAkGA1UEBhMCVVMxEzARBgNV
-# BAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jv
-# c29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0IFRpbWUtU3RhbXAg
-# UENBIDIwMTAwDQYJKoZIhvcNAQEFBQACBQDjPU6lMCIYDzIwMjAxMDIzMjA0NDIx
-# WhgPMjAyMDEwMjQyMDQ0MjFaMHcwPQYKKwYBBAGEWQoEATEvMC0wCgIFAOM9TqUC
-# AQAwCgIBAAICEpwCAf8wBwIBAAICEZ8wCgIFAOM+oCUCAQAwNgYKKwYBBAGEWQoE
-# AjEoMCYwDAYKKwYBBAGEWQoDAqAKMAgCAQACAwehIKEKMAgCAQACAwGGoDANBgkq
-# hkiG9w0BAQUFAAOBgQCibhGRQNCKW2Iff59fromyz2ApVfqAHRFsqoZ9F4ChZsOn
-# ncALtVKAjXj4knMYKl0yzPV9XmxZ8j3m53tpLeO5IQt3HNczgaIbeygQFRRKHxEB
-# R2hpXgXkshIcpn20iDvQ7z4TuZEPtzKR6n5GUDsxPoqP8lnusUuNNhTpTaByzDGC
-# Aw0wggMJAgEBMIGTMHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
+# cG9yYXRpb24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEw
+# MB4XDTIxMDExNDE5MDIxM1oXDTIyMDQxMTE5MDIxM1owgc4xCzAJBgNVBAYTAlVT
+# MRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQK
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1pY3Jvc29mdCBPcGVy
+# YXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjpDNEJE
+# LUUzN0YtNUZGQzElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2Vydmlj
+# ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAN5tA6dUZvnnwL9qQtXc
+# wPANhB4ez+5CQrePp/Z8TH4NBr5vAfGMo0lV/lidBatKTgHErOuKH11xVAfBehHJ
+# vH9T/OhOc83CJs9bzDhrld0Jdy3eJyC0yBdxVeucS+2a2ZBd50wBg/5/2YjQ2ylf
+# D0dxKK6tQLxdODTuadQMbda05lPGnWGwZ3niSgIKVRgqqCVlhHzwNtRh1AH+Zxbf
+# Se7t8z3oEKAdTAy7SsP8ykht3srjdh0BykPFdpaAgqwWCJJJmGk0gArSvHC8+vXt
+# Go3MJhWQRe5JtzdD5kdaKH9uc9gnShsXyDEhGZjx3+b8cuqEO8bHv0WPX9MREfrf
+# xvkCAwEAAaOCARswggEXMB0GA1UdDgQWBBRdMXu76DghnU/kPTMKdFkR9oCp2TAf
+# BgNVHSMEGDAWgBTVYzpcijGQ80N7fEYbxTNoWoVtVTBWBgNVHR8ETzBNMEugSaBH
+# hkVodHRwOi8vY3JsLm1pY3Jvc29mdC5jb20vcGtpL2NybC9wcm9kdWN0cy9NaWNU
+# aW1TdGFQQ0FfMjAxMC0wNy0wMS5jcmwwWgYIKwYBBQUHAQEETjBMMEoGCCsGAQUF
+# BzAChj5odHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpL2NlcnRzL01pY1RpbVN0
+# YVBDQV8yMDEwLTA3LTAxLmNydDAMBgNVHRMBAf8EAjAAMBMGA1UdJQQMMAoGCCsG
+# AQUFBwMIMA0GCSqGSIb3DQEBCwUAA4IBAQAld3kAgG6XWiZyvdibLRmWr7yb6RSy
+# cjVDg8tcCitS01sTVp4T8Ad2QeYfJWfK6DMEk7QRBfKgdN7oE8dXtmQVL+JcxLj0
+# pUuy4NB5RchcteD5dRnTfKlRi8vgKUaxDcoFIzNEUz1EHpopeagDb4/uI9Uj5tIu
+# wlik/qrv/sHAw7kM4gELLNOgdev9Z/7xo1JIwfe0eoQM3wxcCFLuf8S9OncttaFA
+# WHtEER8IvgRAgLJ/WnluFz68+hrDfRyX/qqWSPIE0voE6qFx1z8UvLwKpm65QNyN
+# DRMp/VmCpqRZrxB1o0RY7P+n4jSNGvbk2bR70kKt/dogFFRBHVVuUxf+MIIGcTCC
+# BFmgAwIBAgIKYQmBKgAAAAAAAjANBgkqhkiG9w0BAQsFADCBiDELMAkGA1UEBhMC
+# VVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNV
+# BAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFJv
+# b3QgQ2VydGlmaWNhdGUgQXV0aG9yaXR5IDIwMTAwHhcNMTAwNzAxMjEzNjU1WhcN
+# MjUwNzAxMjE0NjU1WjB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3Rv
+# bjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0
+# aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDCCASIw
+# DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKkdDbx3EYo6IOz8E5f1+n9plGt0
+# VBDVpQoAgoX77XxoSyxfxcPlYcJ2tz5mK1vwFVMnBDEfQRsalR3OCROOfGEwWbEw
+# RA/xYIiEVEMM1024OAizQt2TrNZzMFcmgqNFDdDq9UeBzb8kYDJYYEbyWEeGMoQe
+# dGFnkV+BVLHPk0ySwcSmXdFhE24oxhr5hoC732H8RsEnHSRnEnIaIYqvS2SJUGKx
+# Xf13Hz3wV3WsvYpCTUBR0Q+cBj5nf/VmwAOWRH7v0Ev9buWayrGo8noqCjHw2k4G
+# kbaICDXoeByw6ZnNPOcvRLqn9NxkvaQBwSAJk3jN/LzAyURdXhacAQVPIk0CAwEA
+# AaOCAeYwggHiMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBTVYzpcijGQ80N7
+# fEYbxTNoWoVtVTAZBgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMAQTALBgNVHQ8EBAMC
+# AYYwDwYDVR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBTV9lbLj+iiXGJo0T2UkFvX
+# zpoYxDBWBgNVHR8ETzBNMEugSaBHhkVodHRwOi8vY3JsLm1pY3Jvc29mdC5jb20v
+# cGtpL2NybC9wcm9kdWN0cy9NaWNSb29DZXJBdXRfMjAxMC0wNi0yMy5jcmwwWgYI
+# KwYBBQUHAQEETjBMMEoGCCsGAQUFBzAChj5odHRwOi8vd3d3Lm1pY3Jvc29mdC5j
+# b20vcGtpL2NlcnRzL01pY1Jvb0NlckF1dF8yMDEwLTA2LTIzLmNydDCBoAYDVR0g
+# AQH/BIGVMIGSMIGPBgkrBgEEAYI3LgMwgYEwPQYIKwYBBQUHAgEWMWh0dHA6Ly93
+# d3cubWljcm9zb2Z0LmNvbS9QS0kvZG9jcy9DUFMvZGVmYXVsdC5odG0wQAYIKwYB
+# BQUHAgIwNB4yIB0ATABlAGcAYQBsAF8AUABvAGwAaQBjAHkAXwBTAHQAYQB0AGUA
+# bQBlAG4AdAAuIB0wDQYJKoZIhvcNAQELBQADggIBAAfmiFEN4sbgmD+BcQM9naOh
+# IW+z66bM9TG+zwXiqf76V20ZMLPCxWbJat/15/B4vceoniXj+bzta1RXCCtRgkQS
+# +7lTjMz0YBKKdsxAQEGb3FwX/1z5Xhc1mCRWS3TvQhDIr79/xn/yN31aPxzymXlK
+# kVIArzgPF/UveYFl2am1a+THzvbKegBvSzBEJCI8z+0DpZaPWSm8tv0E4XCfMkon
+# /VWvL/625Y4zu2JfmttXQOnxzplmkIz/amJ/3cVKC5Em4jnsGUpxY517IW3DnKOi
+# PPp/fZZqkHimbdLhnPkd/DjYlPTGpQqWhqS9nhquBEKDuLWAmyI4ILUl5WTs9/S/
+# fmNZJQ96LjlXdqJxqgaKD4kWumGnEcua2A5HmoDF0M2n0O99g/DhO3EJ3110mCII
+# YdqwUB5vvfHhAN/nMQekkzr3ZUd46PioSKv33nJ+YWtvd6mBy6cJrDm77MbL2IK0
+# cs0d9LiFAR6A+xuJKlQ5slvayA1VmXqHczsI5pgt6o3gMy4SKfXAL1QnIffIrE7a
+# KLixqduWsqdCosnPGUFN4Ib5KpqjEWYw07t0MkvfY3v1mYovG8chr1m1rtxEPJdQ
+# cdeh0sVV42neV8HR3jDA/czmTfsNv11P6Z0eGTgvvM9YBS7vDaBQNdrvCScc1bN+
+# NR4Iuto229Nfj950iEkSoYIC0jCCAjsCAQEwgfyhgdSkgdEwgc4xCzAJBgNVBAYT
+# AlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYD
+# VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKTAnBgNVBAsTIE1pY3Jvc29mdCBP
+# cGVyYXRpb25zIFB1ZXJ0byBSaWNvMSYwJAYDVQQLEx1UaGFsZXMgVFNTIEVTTjpD
+# NEJELUUzN0YtNUZGQzElMCMGA1UEAxMcTWljcm9zb2Z0IFRpbWUtU3RhbXAgU2Vy
+# dmljZaIjCgEBMAcGBSsOAwIaAxUAES34SWJ7DfbSG/gbIQwTrzgZ8PKggYMwgYCk
+# fjB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMH
+# UmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSYwJAYDVQQD
+# Ex1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDANBgkqhkiG9w0BAQUFAAIF
+# AOR2i6MwIhgPMjAyMTA2MTgwNzA0MDNaGA8yMDIxMDYxOTA3MDQwM1owdzA9Bgor
+# BgEEAYRZCgQBMS8wLTAKAgUA5HaLowIBADAKAgEAAgIg2gIB/zAHAgEAAgIRlDAK
+# AgUA5HfdIwIBADA2BgorBgEEAYRZCgQCMSgwJjAMBgorBgEEAYRZCgMCoAowCAIB
+# AAIDB6EgoQowCAIBAAIDAYagMA0GCSqGSIb3DQEBBQUAA4GBAKJ6xThFmJ3V2mql
+# isgacPGyukJfggoSad2LkQaxI9Gpi7jPFrBexa+xtdXJfcN+zTNmENwaoTZvTfSR
+# Hjsnya4EMwZnse6ayGAZ3haWlnBWvSbhWX4U5yPX2o2E7FCAjCESQxf6fpK14wlW
+# BxfPNULTbdf5Ld4kFkkoy4IX3MbIMYIDDTCCAwkCAQEwgZMwfDELMAkGA1UEBhMC
+# VVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNV
+# BAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0IFRp
+# bWUtU3RhbXAgUENBIDIwMTACEzMAAAFXRAdi3G/ovioAAAAAAVcwDQYJYIZIAWUD
+# BAIBBQCgggFKMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0B
+# CQQxIgQgALPJu0UFlImBE3z0cAsVMugtE5ql7iE+rBNWNSrLG/8wgfoGCyqGSIb3
+# DQEJEAIvMYHqMIHnMIHkMIG9BCAsWo0NQ6vzuuupUsZEMSJ4UsRjtQw2dFxZWkHt
+# qRygEzCBmDCBgKR+MHwxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xJjAkBgNVBAMTHU1pY3Jvc29mdCBUaW1lLVN0YW1wIFBDQSAyMDEwAhMzAAAB
-# H04lzawK9LgfAAAAAAEfMA0GCWCGSAFlAwQCAQUAoIIBSjAaBgkqhkiG9w0BCQMx
-# DQYLKoZIhvcNAQkQAQQwLwYJKoZIhvcNAQkEMSIEIAUWXvO55ZfT1sWtvdXNB0NK
-# RwVebUHG2qp8orInbuhwMIH6BgsqhkiG9w0BCRACLzGB6jCB5zCB5DCBvQQgqqVw
-# 9wBbf/k7/9NxWOfj0eEILScmByNE1X7fVsE+g6UwgZgwgYCkfjB8MQswCQYDVQQG
-# EwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwG
-# A1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQg
-# VGltZS1TdGFtcCBQQ0EgMjAxMAITMwAAAR9OJc2sCvS4HwAAAAABHzAiBCDFyx51
-# /2ZVbsJxG1qlSl0lwz+Aq2JKnztoc8i4VfAKmjANBgkqhkiG9w0BAQsFAASCAQBm
-# j0lE3U28WlWgiyJ+UuoiQxE+RmukoXIbQnCDBk91DJeiJzIRkox6CRbkkXdXw4OE
-# kkFizP2Af4bOhIKlEnigqB2QuUenF4IL8g/CFh0FxeCsL2Al8dBpP45Jg6bmv+Eb
-# RVfaRHvnM1G9e4FfwCy0r3Jpn8dIo0NabqvXgZRRASCNhFPv1DONkcpcCJxcWwkS
-# kmmb0GDggxjRnvMm1HXfyei8IY4Rz6TAX7NKk7pdw7LhxArVKBbgOSx+WANWV6lQ
-# bP5IPpoGLFGHd5HyiUPl8eODeMI1eMlHVe9JP16pJ4FXh1rnRnB/sQfj5IVB34Mz
-# 2kuE0j2dAh6+Q3IZRrRE
+# V0QHYtxv6L4qAAAAAAFXMCIEIMbk8cfabbCSWyYAPeKgD+acumPF5pEk8aEvy+O7
+# +F7KMA0GCSqGSIb3DQEBCwUABIIBAJGhAQpcZZH02EKZO+6LLfhQLU7AVuzmCsCc
+# hcXYUA3OwJmD+FiaNdCGI04ICI4O4abEN4hjW13tFgWit1h06PwOS41pNh6kTkMP
+# PnyHkVXPA5xLjogJwejLvdJTBFkquXNJm6EcCcpb8uV+cscfJ1ETkp1PbgxMyKqZ
+# 0Ou7PuyDG/btZDCmEzJICb/D+eGunzwjnP6ejztj6zMJSX8lxCcGn0LyC7BVbQYz
+# sGQsKLfnnaZdulCFvjFN0qroWFoVPTh+PJjlUVH6JuXY54twhsiMGY1bL1nXt5U7
+# wSB+tZdnde+dZRPRx3Q3ia8drQ7hkHtdKA3EFZcNQb8pDsVERo8=
 # SIG # End signature block
