@@ -1,4 +1,5 @@
-# Create the object that contains information about the app
+# Create the object that contains information about the app.
+
 $appToUpload = New-MobileAppObject `
     -iosLobApp `
     -displayName 'Test' `
@@ -10,8 +11,9 @@ $appToUpload = New-MobileAppObject `
     -fileName 'test.ipa' `
     -buildNumber 'v1' -versionNumber 'v1' -expirationDateTime ((Get-Date).AddDays(90))
 
-# Upload the app file with the app information
+# Upload the app file with the app information.
 # !! Replace 'test.ipa' with the path to your *.ipa file !!
+
 $createdApp = New-LobApp `
     -filePath 'test.ipa' `
     -mobileApp $appToUpload
