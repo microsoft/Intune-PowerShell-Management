@@ -48,7 +48,7 @@ $ProductStatusMap.Add(524288, "No status flags set (well-initialized state)" );
 $ProductStatusMap.Add(1048576, "Platform is out of date" );
 $ProductStatusMap.Add(2097152, "Platform update is in progress" );
 $ProductStatusMap.Add(4194304, "Platform is about to be outdated" );
-$ProductStatusMap.Add(8388608, "Signature or platform end of life has past or is impending" );
+$ProductStatusMap.Add(8388608, "Signature or platform end of life has passed or is impending" );
 $ProductStatusMap.Add(16777216, "Windows SMode signatures still in use on non-Win10S install" );
 
 function Convert-ProductStatusToString ($productStatus)
