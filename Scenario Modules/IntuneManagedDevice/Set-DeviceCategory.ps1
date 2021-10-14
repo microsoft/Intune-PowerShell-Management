@@ -23,7 +23,7 @@ param(
 )
 
 #
-# Install Microsoft.Graph.Intune if necessary - the Microsoft Intune PowerShell SDK
+# Install Microsoft.Graph.Intune if necessary - the Microsoft Intune PowerShell SDK.
 #
 If ($null -eq (Get-module -Name 'Microsoft.Graph.Intune'))
 {
@@ -31,22 +31,22 @@ If ($null -eq (Get-module -Name 'Microsoft.Graph.Intune'))
 }
 
  #
- # Set Graph schema version to 'beta'
+ # Set Graph schema version to 'beta'.
  #
 (Update-MSGraphEnvironment -SchemaVersion 'beta') | Out-Null
 
  #
- # Connect to AAD using the Intune ITPro credentials
+ # Connect to AAD using the Intune ITPro credentials.
  #
  (Connect-MSGraph) | Out-Null
 
  #
- # Get the Device Category Id based on Display Name
+ # Get the Device Category ID based on Display Name.
  #
 Write-Output "Resolving $($DeviceCategoryName) ..."
 $deviceCategoryId =  (Get-IntuneDeviceCategory | Where-Object { $_.displayName -eq $DeviceCategoryName }).id
 
-# check if Category name resolved or not
+# Check if Category Name resolved or not.
 If ($null -eq $deviceCategoryId)
 {
 	Write-Error "ERROR: Unable to resolve $($DeviceCategoryName) in Intune."
@@ -58,7 +58,7 @@ Else
 }
 
 #
-# Get the Deice Id based on Device Name
+# Get the Deice ID based on Device Name.
 #
 Write-Output "Resolving $($DeviceName) ..."
 $deviceId = (Get-IntuneManagedDevice | Where-Object { $_.deviceName -eq $DeviceName }).id
@@ -66,7 +66,7 @@ $deviceId = (Get-IntuneManagedDevice | Where-Object { $_.deviceName -eq $DeviceN
 # check if Device Name resolved or not
 If ($null -eq $deviceId)
 {
-	Write-Error "ERROR: Unable to resolve $($DeviceName) in Intune."
+	Write-Error "Error: Unable to resolve $($DeviceName) in Intune."
 	throw
 }
 Else
@@ -75,13 +75,13 @@ Else
 }
 
  #
- # Set up the Graph call parameters
+ # Set up the Graph call parameters.
  #
  $deviceCategoryReqBody = (([PSCustomObject]@{"@odata.id" = "https://graph.microsoft.com/beta/deviceManagement/deviceCategories/$($deviceCategoryId)";})| ConvertTo-Json).ToString()
  $deviceCategoryRefUrl = "https://graph.microsoft.com/beta/deviceManagement/managedDevices/$($deviceId)/deviceCategory/`$ref"
 
  #
- # Make the MSGraph call
+ # Make the MSGraph call.
  #
 Try
 {
@@ -94,4 +94,4 @@ Catch
 	throw
 }
 
-Write-Output "SUCCESS: DeviceName=$($DeviceName) assigned to DeviceCategory=$($DeviceCategoryName) in Intune."
+Write-Output "Success: DeviceName=$($DeviceName) assigned to DeviceCategory=$($DeviceCategoryName) in Intune."
