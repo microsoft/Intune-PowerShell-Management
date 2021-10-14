@@ -17,7 +17,7 @@ param([String]$OutputPath = "$env:Appdata\Output.csv")
    $principal = New-Object Security.Principal.WindowsPrincipal $identity
   
    if (!$principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator))  {
-    Write-Host -ForegroundColor Red "Error:  Must run elevated: run as administrator"
+    Write-Host -ForegroundColor Red "Error:  Must run elevated: Run as Administrator"
     Write-Host "No commands completed"
     return
    }
@@ -38,17 +38,17 @@ $ProductStatusMap.Add(512, "System initiated scan in progress" );
 $ProductStatusMap.Add(1024, "System initiated clean in progress" );
 $ProductStatusMap.Add(2048, "There are samples pending submission" );
 $ProductStatusMap.Add(4096, "Product running in evaluation mode" );
-$ProductStatusMap.Add(8192, "PProduct running in non-genuine Windows mode" );
+$ProductStatusMap.Add(8192, "Product running in non-genuine Windows mode" );
 $ProductStatusMap.Add(16384, "Product expired" );
-$ProductStatusMap.Add(32768, "Off-line scan required" );
-$ProductStatusMap.Add(65536, "Service is shutting down as part of system shutdown" );
+$ProductStatusMap.Add(32768, "Offline scan required" );
+$ProductStatusMap.Add(65536, "Service is shutting down as part of a system shutdown" );
 $ProductStatusMap.Add(131072, "Threat remediation failed critically" );
 $ProductStatusMap.Add(262144, "Threat remediation failed non-critically" );
 $ProductStatusMap.Add(524288, "No status flags set (well-initialized state)" );
 $ProductStatusMap.Add(1048576, "Platform is out of date" );
 $ProductStatusMap.Add(2097152, "Platform update is in progress" );
 $ProductStatusMap.Add(4194304, "Platform is about to be outdated" );
-$ProductStatusMap.Add(8388608, "Signature or platform end of life is past or is impending" );
+$ProductStatusMap.Add(8388608, "Signature or platform end of life has past or is impending" );
 $ProductStatusMap.Add(16777216, "Windows SMode signatures still in use on non-Win10S install" );
 
 function Convert-ProductStatusToString ($productStatus)
